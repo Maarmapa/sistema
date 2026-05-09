@@ -1,34 +1,65 @@
 import RunwayML from '@runwayml/sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import cron from 'node-cron';
+import fetch from 'node-fetch';
 import { createServer } from 'http';
 import fs from 'fs';
 import path from 'path';
 
 const runway = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Hardcoded screenplay for testing pipeline
-function getTestScreenplay(date) {
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'REVOKED_TOKEN';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1244921942';
+
+async function sendTelegram(text) {
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text, parse_mode: 'HTML' }),
+  });
+}
+
+async function sendTelegramVideo(videoUrl, caption) {
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendVideo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, video: videoUrl, caption, parse_mode: 'HTML' }),
+  });
+}
+
+async function getBoykotCatalog() {
+  return [
+    { name: 'Acuarela Holbein 15ml', description: 'Pintura acuarela profesional japonesa, colores vibrantes', price: 4900 },
+    { name: 'Pincel Princeton Redondo', description: 'Pincel sintético premium para acuarela y acrílico', price: 3500 },
+    { name: 'Papel Fabriano 300g', description: 'Papel de acuarela 100% algodón, textura fina', price: 8900 },
+    { name: 'Acrílico Liquitex 59ml', description: 'Pintura acrílica profesional, alta pigmentación', price: 5900 },
+    { name: 'Paleta de porcelana', description: 'Paleta mezcla colores, fácil limpieza', price: 2900 },
+  ];
+}
+
+function getTestScreenplay(theme) {
   return [
     {
       scene_number: 1,
-      title: "La Ciudad Duerme",
-      visual_prompt: "Aerial view of a Latin American city at night, neon lights reflecting on wet streets, cyberpunk aesthetic, graffiti on buildings, fog rolling through urban canyons, cinematic, slow drone movement",
+      title: "El Color Emerge",
+      visual_prompt: `Extreme macro of watercolor paint dissolving in water, vibrant pigments blooming in slow motion, ${theme || 'deep blues and greens'} expanding, black background, cinematic`,
       duration_seconds: 5,
-      narration: "The city breathes between algorithms. La ciudad sueña en código."
+      caption: "El color tiene vida propia. 🎨 #acuarela #boykot #arte"
     },
     {
       scene_number: 2,
-      title: "El Pulso Digital",
-      visual_prompt: "Close up of fiber optic cables glowing in dark server room, data streams visible as light particles, industrial decay around high tech equipment, neon green and purple light, cinematic macro shot",
+      title: "La Textura del Arte",
+      visual_prompt: "Close up of watercolor paper texture, brush strokes in slow motion, golden light catching paper grain, cinematic macro",
       duration_seconds: 5,
-      narration: "Every signal carries a dream. Cada señal lleva un sueño perdido."
+      caption: "La textura importa. #fabriano #acuarela #boykot"
     },
     {
       scene_number: 3,
-      title: "Amanecer Binario",
-      visual_prompt: "Dawn breaking over concrete brutalist architecture, golden light hitting graffiti murals, empty streets with scattered code symbols projected on walls, hopeful yet melancholic, cinematic wide shot",
+      title: "Pincel y Destino",
+      visual_prompt: `Artist brush tip loading with ${theme || 'vibrant red'} paint, droplets in slow motion, dark moody background, cinematic`,
       duration_seconds: 5,
-      narration: "Tomorrow is already being generated. El mañana ya está siendo generado."
+      caption: "Cada trazo es una decisión. 🖌️ #pincel #arte #boykot"
     }
   ];
 }
@@ -37,7 +68,7 @@ async function generateScene(scene) {
   console.log(`🎬 Scene ${scene.scene_number}: ${scene.title}`);
   const task = await runway.imageToVideo.create({
     model: 'gen4_turbo',
-    promptImage: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1280&q=80',
+    promptImage: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
     promptText: scene.visual_prompt,
     duration: scene.duration_seconds,
     ratio: '1280:720',
@@ -54,75 +85,98 @@ async function generateScene(scene) {
   return result.output[0];
 }
 
-async function produce() {
-  const date = new Date().toISOString().split('T')[0];
-  console.log(`\n🎥 SISTEMA — Producing film for ${date}`);
+let lastUpdateId = 0;
 
+async function pollTelegram() {
   try {
-    const screenplay = getTestScreenplay(date);
-    console.log('✍️  Using test screenplay (3 scenes)');
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=10`);
+    const data = await res.json();
+    for (const update of data.result || []) {
+      lastUpdateId = update.update_id;
+      const msg = update.message?.text;
+      if (!msg) continue;
+      console.log(`📱 Telegram: ${msg}`);
+      if (msg === '/start' || msg === '/help') {
+        await sendTelegram(`🎥 <b>SISTEMA</b> — Director de cine autónomo\n\nComandos:\n/produce — Genera film\n/tema [tema] — Video con tema específico\n/catalogo — Videos del catálogo Boykot\n/films — Films producidos\n\nPowered by Runway + maarmapa.eth`);
+      } else if (msg === '/produce') {
+        await sendTelegram('🎬 Iniciando producción...');
+        produce();
+      } else if (msg === '/catalogo') {
+        await sendTelegram('🛍️ Generando videos Boykot...');
+        produce('art supplies, watercolor, paint brushes');
+      } else if (msg.startsWith('/tema ')) {
+        const theme = msg.replace('/tema ', '').trim();
+        await sendTelegram(`🎨 Generando: <b>${theme}</b>...`);
+        produce(theme);
+      } else if (msg === '/films') {
+        const dir = './films';
+        const films = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+        await sendTelegram(films.length ? `🎬 Films:\n${films.map(f => `• ${f.replace('.json','')}`).join('\n')}` : 'No hay films aún. Usa /produce');
+      }
+    }
+  } catch (err) {
+    console.error('Telegram error:', err.message);
+  }
+}
 
+async function produce(theme = null) {
+  const date = new Date().toISOString().split('T')[0];
+  console.log(`\n🎥 SISTEMA — ${date}${theme ? ` | ${theme}` : ''}`);
+  try {
+    await sendTelegram(`🎬 <b>SISTEMA produciendo</b>\n📅 ${date}${theme ? `\n🎨 Tema: ${theme}` : ''}`);
+    const screenplay = getTestScreenplay(theme);
     const scenes = [];
     for (const scene of screenplay) {
-      const videoUrl = await generateScene(scene);
-      scenes.push({ ...scene, videoUrl });
+      await sendTelegram(`⏳ Generando: <b>${scene.title}</b>...`);
+      try {
+        const videoUrl = await generateScene(scene);
+        scenes.push({ ...scene, videoUrl });
+        await sendTelegramVideo(videoUrl, `🎬 <b>${scene.title}</b>\n${scene.caption}\n\n<i>SISTEMA · maarmapa.eth</i>`);
+      } catch (err) {
+        await sendTelegram(`❌ Error escena ${scene.scene_number}: ${err.message}`);
+      }
     }
-
-    const manifest = {
-      title: `SISTEMA — ${date}`,
-      date,
-      scenes,
-      produced_by: 'SISTEMA · autonomous film director',
-      oracle: 'maarmapa.eth',
-    };
-
     const dir = './films';
     if (!fs.existsSync(dir)) fs.mkdirSync(dir);
-    fs.writeFileSync(path.join(dir, `${date}.json`), JSON.stringify(manifest, null, 2));
-
-    console.log(`✅ Film produced: ${date}`);
-    console.log('🎬 Videos:', scenes.map(s => s.videoUrl));
-    return manifest;
+    const filename = `${date}${theme ? '-'+theme.slice(0,15).replace(/\s+/g,'-') : ''}.json`;
+    fs.writeFileSync(path.join(dir, filename), JSON.stringify({ title: `SISTEMA — ${date}`, date, theme, scenes }, null, 2));
+    await sendTelegram(`✅ <b>Film completo</b> — ${scenes.length} videos listos`);
   } catch (err) {
-    console.error('❌ Production failed:', err);
+    console.error('❌', err);
+    await sendTelegram(`❌ Error: ${err.message}`);
   }
 }
 
 cron.schedule('0 3 * * *', () => produce());
+setInterval(pollTelegram, 3000);
 
 const server = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
-
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200);
     res.end(JSON.stringify({ status: 'SISTEMA online', time: new Date().toISOString() }));
-    return;
-  }
-
-  if (req.method === 'POST' && req.url === '/produce') {
-    res.writeHead(202);
-    res.end(JSON.stringify({ message: 'Production started' }));
-    produce();
-    return;
-  }
-
-  if (req.method === 'GET' && req.url === '/films') {
+  } else if (req.method === 'POST' && req.url === '/produce') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      const { theme } = body ? JSON.parse(body) : {};
+      res.writeHead(202);
+      res.end(JSON.stringify({ message: 'Production started', theme: theme || null }));
+      produce(theme);
+    });
+  } else if (req.method === 'GET' && req.url === '/films') {
     const dir = './films';
-    const films = fs.existsSync(dir) ? fs.readdirSync(dir).map(f => ({
-      date: f.replace('.json', ''),
-      data: JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))
-    })) : [];
+    const films = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
     res.writeHead(200);
     res.end(JSON.stringify({ films }));
-    return;
+  } else {
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: 'Not found' }));
   }
-
-  res.writeHead(404);
-  res.end(JSON.stringify({ error: 'Not found' }));
 });
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
-  console.log(`🎥 SISTEMA running on port ${PORT}`);
-  console.log('🔧 Manual trigger: POST /produce');
+  console.log(`🎥 SISTEMA on port ${PORT}`);
+  console.log('📱 Telegram: @Maarmapa_bot');
 });
