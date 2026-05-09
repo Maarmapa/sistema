@@ -1,58 +1,36 @@
-import Anthropic from '@anthropic-ai/sdk';
 import RunwayML from '@runwayml/sdk';
 import cron from 'node-cron';
-import fetch from 'node-fetch';
 import { createServer } from 'http';
 import fs from 'fs';
 import path from 'path';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const runway = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET });
 
-async function getWorldSignals() {
-  try {
-    const res = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
-    const ids = await res.json();
-    const top5 = ids.slice(0, 5);
-    const stories = await Promise.all(
-      top5.map(async (id) => {
-        const r = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`);
-        return r.json();
-      })
-    );
-    return stories.filter(s => s && s.title).map(s => s.title).join('\n');
-  } catch (e) {
-    return 'The world is dreaming. Technology evolves. Cities breathe.';
-  }
-}
-
-async function writeScreenplay(signals) {
-  const res = await anthropic.messages.create({
-    model: 'claude-opus-4-5',
-    max_tokens: 1500,
-    messages: [{
-      role: 'user',
-      content: `You are SISTEMA — autonomous cyberpunk Latin American film director.
-
-Today's world signals:
-${signals}
-
-Write a 3-scene short film. Each scene needs:
-- scene_number (1, 2, 3)
-- title (short, evocative)
-- visual_prompt (for Runway Gen-4.5: cinematic, 50-80 words, no faces)
-- duration_seconds (5)
-- narration (1-2 sentences, poetic, bilingual Spanish/English)
-
-Aesthetic: cyberpunk latinoamericano, urban decay, neon and concrete, graffiti.
-
-Respond ONLY with valid JSON array, no markdown:
-[{"scene_number":1,"title":"...","visual_prompt":"...","duration_seconds":5,"narration":"..."}]`
-    }]
-  });
-
-  const text = res.content[0].type === 'text' ? res.content[0].text : '[]';
-  return JSON.parse(text.trim());
+// Hardcoded screenplay for testing pipeline
+function getTestScreenplay(date) {
+  return [
+    {
+      scene_number: 1,
+      title: "La Ciudad Duerme",
+      visual_prompt: "Aerial view of a Latin American city at night, neon lights reflecting on wet streets, cyberpunk aesthetic, graffiti on buildings, fog rolling through urban canyons, cinematic, slow drone movement",
+      duration_seconds: 5,
+      narration: "The city breathes between algorithms. La ciudad sueña en código."
+    },
+    {
+      scene_number: 2,
+      title: "El Pulso Digital",
+      visual_prompt: "Close up of fiber optic cables glowing in dark server room, data streams visible as light particles, industrial decay around high tech equipment, neon green and purple light, cinematic macro shot",
+      duration_seconds: 5,
+      narration: "Every signal carries a dream. Cada señal lleva un sueño perdido."
+    },
+    {
+      scene_number: 3,
+      title: "Amanecer Binario",
+      visual_prompt: "Dawn breaking over concrete brutalist architecture, golden light hitting graffiti murals, empty streets with scattered code symbols projected on walls, hopeful yet melancholic, cinematic wide shot",
+      duration_seconds: 5,
+      narration: "Tomorrow is already being generated. El mañana ya está siendo generado."
+    }
+  ];
 }
 
 async function generateScene(scene) {
@@ -81,11 +59,8 @@ async function produce() {
   console.log(`\n🎥 SISTEMA — Producing film for ${date}`);
 
   try {
-    console.log('📡 Getting world signals...');
-    const signals = await getWorldSignals();
-
-    console.log('✍️  Writing screenplay...');
-    const screenplay = await writeScreenplay(signals);
+    const screenplay = getTestScreenplay(date);
+    console.log('✍️  Using test screenplay (3 scenes)');
 
     const scenes = [];
     for (const scene of screenplay) {
@@ -96,7 +71,6 @@ async function produce() {
     const manifest = {
       title: `SISTEMA — ${date}`,
       date,
-      signals: signals.split('\n').slice(0, 5),
       scenes,
       produced_by: 'SISTEMA · autonomous film director',
       oracle: 'maarmapa.eth',
@@ -107,16 +81,15 @@ async function produce() {
     fs.writeFileSync(path.join(dir, `${date}.json`), JSON.stringify(manifest, null, 2));
 
     console.log(`✅ Film produced: ${date}`);
+    console.log('🎬 Videos:', scenes.map(s => s.videoUrl));
     return manifest;
   } catch (err) {
     console.error('❌ Production failed:', err);
   }
 }
 
-// Daily at midnight Santiago time
 cron.schedule('0 3 * * *', () => produce());
 
-// HTTP server
 const server = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
 
@@ -135,7 +108,10 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/films') {
     const dir = './films';
-    const films = fs.existsSync(dir) ? fs.readdirSync(dir).map(f => f.replace('.json', '')) : [];
+    const films = fs.existsSync(dir) ? fs.readdirSync(dir).map(f => ({
+      date: f.replace('.json', ''),
+      data: JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))
+    })) : [];
     res.writeHead(200);
     res.end(JSON.stringify({ films }));
     return;
@@ -148,6 +124,5 @@ const server = createServer(async (req, res) => {
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`🎥 SISTEMA running on port ${PORT}`);
-  console.log('📅 Scheduled: daily midnight Santiago time');
   console.log('🔧 Manual trigger: POST /produce');
 });
