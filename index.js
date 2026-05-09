@@ -40,7 +40,7 @@ async function generateScene(scene) {
     promptImage: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1280&q=80',
     promptText: scene.visual_prompt,
     duration: scene.duration_seconds,
-    ratio: '1280:768',
+    ratio: '1280:720',
   });
 
   let result = task;
