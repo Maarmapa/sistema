@@ -224,7 +224,8 @@ async function pollTelegram() {
       console.log(`📱 ${msg}`);
 
       if (msg === '/start' || msg === '/help') {
-        await sendTelegram(`🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot\n\n<b>🎬 Mini Docu</b>\n/produce — Film con señales del mundo\n/tema [tema] — Video temático\n/films — Films producidos\n\n<b>🛍️ Boykot Factory</b>\n/url [url] — Video de producto boykot.cl (Gen-4 Image + Gen-4.5)\n/boykot-top — Top productos en stock\n/boykot-liquidacion — Últimas unidades\n/boykot-marcas — Por marcas top\n\nPowered by Runway + maarmapa.eth`);
+        await sendTelegram(`🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot\n\n<b>🎬 Mini Docu</b>\n/produce — Film con señales del mundo\n/tema [tema] — Video temático\n/films — Films producidos\n\n<b>🛍️ Boykot Factory</b>\n/url [url] — Video de producto boykot.cl
+/docu-boykot [marca] — Mini film de marca (angelus/copic/molotow/holbein)\n/boykot-top — Top productos en stock\n/boykot-liquidacion — Últimas unidades\n/boykot-marcas — Por marcas top\n\nPowered by Runway + maarmapa.eth`);
       } else if (msg === '/produce') {
         await sendTelegram('🎬 Produciendo...');
         produce();
@@ -240,6 +241,10 @@ async function pollTelegram() {
         const url = msg.replace('/url ', '').trim();
         await sendTelegram('🛍️ Procesando producto...');
         runBoykotUrl(url);
+      } else if (msg.startsWith('/docu-boykot')) {
+        const brand = msg.replace('/docu-boykot', '').trim() || 'default';
+        await sendTelegram('🎬 Iniciando Docu Boykot: ' + brand + '...');
+        runDocuBoykot(brand);
       } else if (msg === '/boykot-top') {
         await sendTelegram('🛍️ Generando top productos Boykot...');
         runBoykotFactory('top', 3);
@@ -309,3 +314,133 @@ server.listen(PORT, () => {
   console.log('📱 Telegram: @Maarmapabot');
   console.log('🛍️ /url [boykot url] — Gen-4 Image + Gen-4.5 Video');
 });
+
+// ── DOCU BOYKOT ───────────────────────────────────────────────
+const BRAND_URLS = {
+  angelus: [
+    'https://www.boykot.cl/tienda/pintura/angelus/roll-call-edge-dressing-black/',
+    'https://www.boykot.cl/tienda/limpiadores/angelus-suede-renew-4-oz-pump-spray/',
+    'https://www.boykot.cl/tienda/limpiadores/deodorizer-4-oz-pump-spray/',
+  ],
+  copic: [
+    'https://www.boykot.cl/tienda/marcadores/copic-markers/sets/copic-acrea-set-de-6-colores-vivid/',
+    'https://www.boykot.cl/tienda/lapices/tiralineas/multiliner-copic-black-set/',
+    'https://www.boykot.cl/tienda/copic/mesa-de-luz-copic-comic-master-led-a4/',
+  ],
+  holbein: [
+    'https://www.boykot.cl/categoria-producto/pintura/holbein/acuarela-holbein/',
+  ],
+  molotow: [
+    'https://www.boykot.cl/tienda/pintura/sprays/premium-molotow/molotow-premium-400-ml/',
+    'https://www.boykot.cl/tienda/pintura/sprays/urban-fine-art/molotow-neon-ufa/',
+    'https://www.boykot.cl/tienda/marcadores/molotow-markers/molotow-markers-sets/one4all-127hs-basic-set-3-200478/',
+  ],
+};
+
+const DOCU_SCRIPTS = {
+  angelus: [
+    { title: "La Piel Recuerda", narration: "Cada superficie tiene memoria. Angelus la transforma.", motion: "Slow macro reveal of leather shoe being painted, brush stroke in slow motion, color bleeding into texture" },
+    { title: "El Ritual del Color", narration: "No es pintura. Es un pacto con el material.", motion: "Product bottle opens, paint drips in slow motion onto dark surface, spreading like ink in water" },
+    { title: "Resistencia", narration: "Lo que fue suyo, ahora es tuyo.", motion: "Cinematic close up of freshly painted sneaker, light catching the surface, dramatic studio lighting" },
+  ],
+  copic: [
+    { title: "El Trazo Infinito", narration: "Un marcador que dura para siempre. Como ciertas ideas.", motion: "Copic marker tip moving across paper in extreme slow motion, ink flowing, colors blending seamlessly" },
+    { title: "La Paleta del Universo", narration: "358 colores. Uno para cada estado del alma.", motion: "Array of Copic markers arranged, camera pans slowly, colors gradient from warm to cool" },
+    { title: "Precisión Quirúrgica", narration: "El multiliner no perdona. Tampoco el artista.", motion: "Thin precise line being drawn, camera extremely close, paper texture visible, perfect black line" },
+  ],
+  molotow: [
+    { title: "La Calle Habla", narration: "400ml de declaración. El spray que fundó una cultura.", motion: "Spray can in slow motion, paint dispersing in air, mist catching dramatic side light" },
+    { title: "Neon en la Oscuridad", narration: "Algunos colores no pueden ser ignorados.", motion: "Neon paint glowing under UV light, slow reveal from darkness, electric color explosion" },
+    { title: "El Mural Eterno", narration: "Lo efímero hecho permanente. Boykot.", motion: "Paint being applied to concrete wall texture, slow cinematic push in, urban atmosphere" },
+  ],
+  default: [
+    { title: "El Arte Como Resistencia", narration: "En un mundo de algoritmos, el trazo manual es un acto político.", motion: "Extreme macro of art supplies, ink spreading on paper, slow motion paint explosion" },
+    { title: "La Materia del Sueño", narration: "Cada producto es una posibilidad. Boykot las reúne todas.", motion: "Products arranged in dark studio, dramatic rim lighting, slow orbit camera movement" },
+    { title: "Santiago Pinta", narration: "Desde 2010. La ciudad cambió. Boykot también.", motion: "Art supplies silhouetted against urban Santiago skyline, cinematic wide shot, golden hour" },
+  ],
+};
+
+async function scrapeProductImage(url) {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
+    const html = await res.text();
+    const imgMatch = html.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/);
+    if (!imgMatch) return null;
+    return imgMatch[0].replace(/-\d+x\d+\./, '.');
+  } catch(e) {
+    return null;
+  }
+}
+
+async function runDocuBoykot(brand = 'default') {
+  const brandKey = brand.toLowerCase();
+  const script = DOCU_SCRIPTS[brandKey] || DOCU_SCRIPTS.default;
+  const urls = BRAND_URLS[brandKey] || [];
+
+  console.log(`\n🎬 DOCU BOYKOT — ${brand}`);
+  await sendTelegram(`🎬 <b>Docu Boykot: ${brand.toUpperCase()}</b>\n${script.length} escenas · Generando mini film...`);
+
+  // Scrape product images
+  const productImages = [];
+  for (const url of urls.slice(0, script.length)) {
+    const img = await scrapeProductImage(url);
+    if (img) productImages.push(img);
+  }
+
+  await sendTelegram(`📸 ${productImages.length} imágenes de productos scrapeadas\n🎥 Iniciando producción...`);
+
+  const scenes = [];
+  for (let i = 0; i < script.length; i++) {
+    const scene = script[i];
+    const productImg = productImages[i] || null;
+
+    await sendTelegram(`⏳ Escena ${i+1}/${script.length}: <b>${scene.title}</b>\n<i>${scene.narration}</i>`);
+
+    try {
+      let videoUrl;
+
+      if (productImg) {
+        // Use real product image as reference
+        const imageTask = await runway.textToImage.create({
+          model: 'gen4_image',
+          promptText: `Cinematic editorial: ${scene.motion}. Black background, dramatic lighting, photorealistic, no text, no people`,
+          ratio: '1920:1080',
+          referenceImages: [{ uri: productImg, weight: 0.75 }],
+        }).waitForTaskOutput();
+
+        const renderUrl = imageTask.output[0];
+
+        const videoTask = await runway.imageToVideo.create({
+          model: 'gen4_turbo',
+          promptImage: renderUrl,
+          promptText: scene.motion + ', cinematic, slow motion, dramatic',
+          duration: 5,
+          ratio: '1280:720',
+        }).waitForTaskOutput();
+
+        videoUrl = videoTask.output[0];
+      } else {
+        // Fallback — text only
+        const task = await runway.imageToVideo.create({
+          model: 'gen4_turbo',
+          promptImage: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
+          promptText: scene.motion + ', cinematic, dramatic lighting, black background',
+          duration: 5,
+          ratio: '1280:720',
+        }).waitForTaskOutput();
+        videoUrl = task.output[0];
+      }
+
+      scenes.push({ ...scene, videoUrl });
+      await sendTelegramVideo(videoUrl, `🎬 <b>${scene.title}</b>\n\n<i>"${scene.narration}"</i>\n\n<b>Boykot.cl</b> · ${brand.toUpperCase()}\n#boykot #${brandKey} #artesupplies #chile`);
+
+    } catch(e) {
+      await sendTelegram(`❌ Error escena ${i+1}: ${e.message}`);
+    }
+
+    // Buffer between scenes
+    await new Promise(r => setTimeout(r, 5000));
+  }
+
+  await sendTelegram(`✅ <b>Docu Boykot: ${brand.toUpperCase()} completo</b>\n🎬 ${scenes.length} escenas generadas\n\nPowered by Runway Gen-4 + maarmapa.eth`);
+}
