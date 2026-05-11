@@ -1,5 +1,4 @@
 import RunwayML from '@runwayml/sdk';
-import Anthropic from '@anthropic-ai/sdk';
 import cron from 'node-cron';
 import fetch from 'node-fetch';
 import { createServer } from 'http';
@@ -10,7 +9,6 @@ const runway = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET });
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'REVOKED_TOKEN';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1244921942';
 const RUNWAY_KEY = process.env.RUNWAYML_API_SECRET;
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 // ── TELEGRAM ──────────────────────────────────────────────────
 async function sendTelegram(text) {
@@ -52,8 +50,6 @@ function getProducts(catalog, mode = 'top', limit = 3) {
   let products = catalog.filter(p => p.name && p.name.trim() !== '');
   if (mode === 'liquidacion') {
     products = products.filter(p => p.variants?.some(v => v.stock > 0 && v.stock <= 5));
-  } else if (mode === 'instock') {
-    products = products.filter(p => p.variants?.some(v => v.stock > 0));
   } else if (mode === 'marcas') {
     const brands = {};
     products.forEach(p => {
@@ -69,109 +65,7 @@ function getProducts(catalog, mode = 'top', limit = 3) {
   return products.sort(() => Math.random() - 0.5).slice(0, limit);
 }
 
-async function generateProductImage(prompt) {
-  const res = await fetch('https://api.dev.runwayml.com/v1/text_to_image', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RUNWAY_KEY}`, 'X-Runway-Version': '2024-11-06' },
-    body: JSON.stringify({ model: 'gpt_image_2', promptText: prompt, ratio: '1920:1920' }),
-  });
-  const d = await res.json();
-  if (!d.id) throw new Error(JSON.stringify(d).slice(0, 100));
-  for (let i = 0; i < 24; i++) {
-    await new Promise(r => setTimeout(r, 5000));
-    const poll = await fetch(`https://api.dev.runwayml.com/v1/tasks/${d.id}`, {
-      headers: { 'Authorization': `Bearer ${RUNWAY_KEY}`, 'X-Runway-Version': '2024-11-06' },
-    });
-    const t = await poll.json();
-    if (t.status === 'SUCCEEDED') return t.output?.[0];
-    if (t.status === 'FAILED') throw new Error('Image failed');
-  }
-  throw new Error('Image timeout');
-}
-
-async function generateProductVideo(imageUrl, prompt) {
-  const task = await runway.imageToVideo.create({
-    model: 'gen4_turbo',
-    promptImage: imageUrl,
-    promptText: prompt,
-    duration: 5,
-    ratio: '1280:720',
-  });
-  let result = task;
-  while (result.status !== 'SUCCEEDED' && result.status !== 'FAILED') {
-    await new Promise(r => setTimeout(r, 3000));
-    result = await runway.tasks.retrieve(task.id);
-  }
-  if (result.status === 'FAILED') throw new Error('Video failed');
-  return result.output[0];
-}
-
-async function runBoykotFactory(mode = 'top', limit = 3) {
-  console.log(`\n🛍️ BOYKOT FACTORY — mode: ${mode}`);
-  await sendTelegram(`🛍️ <b>Boykot Factory</b>\nModo: ${mode} · ${limit} productos`);
-
-  const catalog = loadCatalog();
-  if (!catalog.length) { await sendTelegram('❌ Catálogo no disponible'); return; }
-
-  const products = getProducts(catalog, mode, limit);
-  if (!products.length) { await sendTelegram('❌ No hay productos para este modo'); return; }
-
-  await sendTelegram(`📦 Productos:\n${products.map(p => `• ${p.name}`).join('\n')}`);
-
-  for (const product of products) {
-    await sendTelegram(`⏳ Generando: <b>${product.name}</b>...`);
-    try {
-      const imgPrompt = `Editorial product photo of ${product.name} art supply, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal, high contrast, professional studio, no people, no text`;
-      const vidPrompt = `Slow cinematic product reveal, ${product.name} rotates gently, dramatic studio lighting sweeps across surface, black background, yellow light accent`;
-      const caption = `<b>${product.name}</b>\n${product.category ? '📁 ' + product.category : ''}\n\nDisponible en boykot.cl 🎨\n#boykot #artesupplies #chile${mode === 'liquidacion' ? '\n🔥 ÚLTIMAS UNIDADES' : ''}`;
-
-      const imgUrl = await generateProductImage(imgPrompt);
-      await sendTelegramPhoto(imgUrl, `📸 ${product.name}`);
-
-      const vidUrl = await generateProductVideo(imgUrl, vidPrompt);
-      await sendTelegramVideo(vidUrl, caption);
-
-      await new Promise(r => setTimeout(r, 8000));
-    } catch(e) {
-      await sendTelegram(`❌ Error en ${product.name}: ${e.message}`);
-    }
-  }
-  await sendTelegram(`✅ <b>Boykot Factory listo</b> — ${products.length} productos`);
-}
-
-// ── MINI DOCU ─────────────────────────────────────────────────
-async function getWorldSignals() {
-  try {
-    const res = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
-    const ids = await res.json();
-    const stories = await Promise.all(ids.slice(0, 5).map(async id => {
-      const r = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`);
-      return r.json();
-    }));
-    return stories.filter(s => s?.title).map(s => s.title).join('\n');
-  } catch { return 'Technology evolves. Cities breathe. Art persists.'; }
-}
-
-function getTestScreenplay(theme) {
-  return [
-    {
-      title: "El Color Emerge",
-      visual_prompt: `Extreme slow motion macro: ${theme || 'vivid magenta'} watercolor drop exploding on black background, fractal pigment patterns, 4K cinematic`,
-      caption: "El color tiene vida propia. 🎨 #acuarela #boykot #arte"
-    },
-    {
-      title: "La Textura del Arte",
-      visual_prompt: "Close up of watercolor paper texture, brush strokes in slow motion, golden light catching paper grain, cinematic macro",
-      caption: "La textura importa. #fabriano #acuarela #boykot"
-    },
-    {
-      title: "Pincel y Destino",
-      visual_prompt: `Artist brush tip loading with ${theme || 'vibrant red'} paint, droplets in slow motion, dark moody background, cinematic`,
-      caption: "Cada trazo es una decisión. 🖌️ #pincel #arte #boykot"
-    }
-  ];
-}
-
+// ── VIDEO GENERATION ──────────────────────────────────────────
 async function generateScene(scene) {
   console.log(`🎬 ${scene.title}`);
   const task = await runway.imageToVideo.create({
@@ -191,12 +85,109 @@ async function generateScene(scene) {
   return result.output[0];
 }
 
+// ── BOYKOT URL — Gen-4 Image + Gen-4.5 Video ─────────────────
+async function runBoykotUrl(productUrl) {
+  try {
+    await sendTelegram(`🛍️ Scrapeando producto...`);
+    const res = await fetch(productUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const html = await res.text();
+
+    const imgMatch = html.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/);
+    if (!imgMatch) { await sendTelegram('❌ No se encontró imagen'); return; }
+    const imgUrl = imgMatch[0].replace(/-\d+x\d+\./, '.');
+
+    const nameMatch = html.match(/<h1[^>]*class="[^"]*product_title[^"]*"[^>]*>([^<]+)<\/h1>/);
+    const productName = nameMatch?.[1]?.trim() || 'Producto Boykot';
+
+    const priceMatch = html.match(/\$[\d\.,]+/);
+    const price = priceMatch?.[0] || '';
+
+    await sendTelegram(`📦 <b>${productName}</b>\n${price}\n🎨 Generando render editorial...`);
+    await sendTelegramPhoto(imgUrl, `📸 Original: ${productName}`);
+
+    // Gen-4 Image — render editorial
+    const imageTask = await runway.textToImage.create({
+      model: 'gen4_image',
+      promptText: `Professional editorial product render of ${productName} art supply, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal studio, high contrast, photorealistic, no people, no text`,
+      ratio: '1920:1080',
+    }).waitForTaskOutput();
+
+    const renderUrl = imageTask.output[0];
+    await sendTelegramPhoto(renderUrl, `🎨 Render: ${productName}`);
+    await sendTelegram(`🎬 Animando con Gen-4.5...`);
+
+    // Gen-4.5 — video
+    const videoTask = await runway.imageToVideo.create({
+      model: 'gen4_turbo',
+      promptImage: renderUrl,
+      promptText: `Slow cinematic product reveal, ${productName}, dramatic lighting sweeps across surface, elegant rotation, black background, yellow light accent`,
+      duration: 5,
+      ratio: '1280:720',
+    }).waitForTaskOutput();
+
+    const caption = `🎬 <b>${productName}</b>\n${price ? '💰 ' + price + '\n' : ''}\nboykot.cl 🎨\n#boykot #artesupplies #chile`;
+    await sendTelegramVideo(videoTask.output[0], caption);
+
+  } catch(e) {
+    await sendTelegram(`❌ Error: ${e.message}`);
+  }
+}
+
+// ── BOYKOT FACTORY ────────────────────────────────────────────
+async function runBoykotFactory(mode = 'top', limit = 3) {
+  console.log(`\n🛍️ BOYKOT FACTORY — mode: ${mode}`);
+  await sendTelegram(`🛍️ <b>Boykot Factory</b>\nModo: ${mode} · ${limit} productos`);
+
+  const catalog = loadCatalog();
+  if (!catalog.length) { await sendTelegram('❌ Catálogo no disponible'); return; }
+
+  const products = getProducts(catalog, mode, limit);
+  if (!products.length) { await sendTelegram('❌ No hay productos para este modo'); return; }
+
+  await sendTelegram(`📦 Productos:\n${products.map(p => `• ${p.name}`).join('\n')}`);
+
+  for (const product of products) {
+    await sendTelegram(`⏳ Generando: <b>${product.name}</b>...`);
+    try {
+      const vidPrompt = `Slow cinematic product reveal, ${product.name} art supply rotates gently, dramatic studio lighting, black background, yellow #CCFF00 light accent`;
+      const videoUrl = await generateScene({ title: product.name, visual_prompt: vidPrompt });
+      const caption = `🎬 <b>${product.name}</b>\n${product.category ? '📁 ' + product.category : ''}\n\nboykot.cl 🎨\n#boykot #artesupplies #chile${mode === 'liquidacion' ? '\n🔥 ÚLTIMAS UNIDADES' : ''}`;
+      await sendTelegramVideo(videoUrl, caption);
+      await new Promise(r => setTimeout(r, 5000));
+    } catch(e) {
+      await sendTelegram(`❌ Error en ${product.name}: ${e.message}`);
+    }
+  }
+  await sendTelegram(`✅ <b>Boykot Factory listo</b> — ${products.length} productos`);
+}
+
+// ── MINI DOCU ─────────────────────────────────────────────────
+function getScreenplay(theme) {
+  return [
+    {
+      title: "El Color Emerge",
+      visual_prompt: `Extreme slow motion macro: ${theme || 'vivid magenta'} watercolor drop exploding on black background, fractal pigment patterns, 4K cinematic`,
+      caption: "El color tiene vida propia. 🎨 #acuarela #boykot #arte"
+    },
+    {
+      title: "La Textura del Arte",
+      visual_prompt: "Close up of watercolor paper texture, brush strokes in slow motion, golden light catching paper grain, cinematic macro",
+      caption: "La textura importa. #fabriano #acuarela #boykot"
+    },
+    {
+      title: "Pincel y Destino",
+      visual_prompt: `Artist brush tip loading with ${theme || 'vibrant red'} paint, droplets in slow motion, dark moody background, cinematic`,
+      caption: "Cada trazo es una decisión. 🖌️ #pincel #arte #boykot"
+    }
+  ];
+}
+
 async function produce(theme = null) {
   const date = new Date().toISOString().split('T')[0];
   console.log(`\n🎥 SISTEMA — ${date} | ${theme || 'default'}`);
   try {
     await sendTelegram(`🎬 <b>SISTEMA produciendo</b>\n📅 ${date}${theme ? `\n🎨 Tema: ${theme}` : ''}`);
-    const screenplay = getTestScreenplay(theme);
+    const screenplay = getScreenplay(theme);
     const scenes = [];
     for (const scene of screenplay) {
       await sendTelegram(`⏳ <b>${scene.title}</b>...`);
@@ -232,7 +223,7 @@ async function pollTelegram() {
       console.log(`📱 ${msg}`);
 
       if (msg === '/start' || msg === '/help') {
-        await sendTelegram(`🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot\n\n<b>🎬 Mini Docu</b>\n/produce — Film con señales del mundo\n/tema [tema] — Video temático\n/films — Films producidos\n\n<b>🛍️ Boykot Factory</b>\n/boykot-top — Top productos en stock\n/boykot-liquidacion — Productos últimas unidades\n/boykot-marcas — Por marcas top\n/boykot [N] — N productos random\n\nPowered by Runway + maarmapa.eth`);
+        await sendTelegram(`🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot\n\n<b>🎬 Mini Docu</b>\n/produce — Film con señales del mundo\n/tema [tema] — Video temático\n/films — Films producidos\n\n<b>🛍️ Boykot Factory</b>\n/url [url] — Video de producto boykot.cl (Gen-4 Image + Gen-4.5)\n/boykot-top — Top productos en stock\n/boykot-liquidacion — Últimas unidades\n/boykot-marcas — Por marcas top\n\nPowered by Runway + maarmapa.eth`);
       } else if (msg === '/produce') {
         await sendTelegram('🎬 Produciendo...');
         produce();
@@ -244,6 +235,10 @@ async function pollTelegram() {
         const dir = './films';
         const films = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
         await sendTelegram(films.length ? `🎬 Films:\n${films.map(f=>`• ${f.replace('.json','')}`).join('\n')}` : 'No hay films. Usa /produce');
+      } else if (msg.startsWith('/url ')) {
+        const url = msg.replace('/url ', '').trim();
+        await sendTelegram('🛍️ Procesando producto...');
+        runBoykotUrl(url);
       } else if (msg === '/boykot-top') {
         await sendTelegram('🛍️ Generando top productos Boykot...');
         runBoykotFactory('top', 3);
@@ -253,12 +248,6 @@ async function pollTelegram() {
       } else if (msg === '/boykot-marcas') {
         await sendTelegram('🎨 Generando por marcas Boykot...');
         runBoykotFactory('marcas', 3);
-      } else if (msg.startsWith('/url ')) {
-        const url = msg.replace('/url ', '').trim();
-        runBoykotUrl(url);
-      } else if (msg.startsWith('/boykot ')) {
-        const n = parseInt(msg.replace('/boykot ', '')) || 3;
-        runBoykotFactory('top', n);
       }
     }
   } catch (err) {
@@ -292,10 +281,15 @@ const server = createServer(async (req, res) => {
     let body = '';
     req.on('data', d => body += d);
     req.on('end', () => {
-      const { mode, limit } = body ? JSON.parse(body) : {};
+      const { mode, limit, url } = body ? JSON.parse(body) : {};
       res.writeHead(202);
-      res.end(JSON.stringify({ message: 'Boykot factory started', mode: mode || 'top' }));
-      runBoykotFactory(mode || 'top', limit || 3);
+      if (url) {
+        res.end(JSON.stringify({ message: 'Boykot URL started' }));
+        runBoykotUrl(url);
+      } else {
+        res.end(JSON.stringify({ message: 'Boykot factory started', mode: mode || 'top' }));
+        runBoykotFactory(mode || 'top', limit || 3);
+      }
     });
   } else if (req.method === 'GET' && req.url === '/films') {
     const dir = './films';
@@ -312,79 +306,5 @@ const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`🎥 SISTEMA on port ${PORT}`);
   console.log('📱 Telegram: @Maarmapabot');
-  console.log('🛍️ Boykot Factory: /boykot-top /boykot-liquidacion /boykot-marcas');
+  console.log('🛍️ /url [boykot url] — Gen-4 Image + Gen-4.5 Video');
 });
-async function runBoykotUrl(productUrl) {
-  try {
-    await sendTelegram(`🛍️ Scrapeando producto...`);
-    const res = await fetch(productUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    const html = await res.text();
-    
-    const imgMatch = html.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/);
-    if (!imgMatch) { await sendTelegram('❌ No se encontró imagen'); return; }
-    const imgUrl = imgMatch[0].replace(/-\d+x\d+\./, '.');
-    
-    const nameMatch = html.match(/<h1[^>]*class="[^"]*product_title[^"]*"[^>]*>([^<]+)<\/h1>/);
-    const productName = nameMatch?.[1]?.trim() || 'Producto Boykot';
-    
-    const priceMatch = html.match(/\$[\d\.,]+/);
-    const price = priceMatch?.[0] || '';
-    
-    await sendTelegram(`📦 <b>${productName}</b>\n${price}\n🎨 Generando render editorial...`);
-    await sendTelegramPhoto(imgUrl, `📸 Original: ${productName}`);
-    
-    // Gen-4 Image — render editorial
-    const imageTask = await runway.textToImage.cr
-
-
-
-
-cat >> index.js << 'EOF'
-
-async function runBoykotUrl(productUrl) {
-  try {
-    await sendTelegram(`🛍️ Scrapeando producto...`);
-    const res = await fetch(productUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    const html = await res.text();
-    
-    const imgMatch = html.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/);
-    if (!imgMatch) { await sendTelegram('❌ No se encontró imagen'); return; }
-    const imgUrl = imgMatch[0].replace(/-\d+x\d+\./, '.');
-    
-    const nameMatch = html.match(/<h1[^>]*class="[^"]*product_title[^"]*"[^>]*>([^<]+)<\/h1>/);
-    const productName = nameMatch?.[1]?.trim() || 'Producto Boykot';
-    
-    const priceMatch = html.match(/\$[\d\.,]+/);
-    const price = priceMatch?.[0] || '';
-    
-    await sendTelegram(`📦 <b>${productName}</b>\n${price}\n🎨 Generando render editorial...`);
-    await sendTelegramPhoto(imgUrl, `📸 Original: ${productName}`);
-    
-    // Gen-4 Image — render editorial
-    const imageTask = await runway.textToImage.create({
-      model: 'gen4_image',
-      promptText: `Professional editorial product render of ${productName} art supply, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal studio, high contrast, photorealistic, no people, no text`,
-      ratio: '1920:1080',
-    }).waitForTaskOutput();
-    
-    const renderUrl = imageTask.output[0];
-    await sendTelegramPhoto(renderUrl, `🎨 Render: ${productName}`);
-    
-    await sendTelegram(`🎬 Animando con Gen-4.5...`);
-    
-    // Gen-4.5 — video
-    const videoTask = await runway.imageToVideo.create({
-      model: 'gen4_turbo',
-      promptImage: renderUrl,
-      promptText: `Slow cinematic product reveal, ${productName}, dramatic lighting sweeps across surface, elegant rotation, black background, yellow light accent`,
-      duration: 5,
-      ratio: '1280:720',
-    }).waitForTaskOutput();
-    
-    const caption = `🎬 <b>${productName}</b>\n${price ? '💰 ' + price + '\n' : ''}\nboykot.cl 🎨\n#boykot #artesupplies #chile`;
-    await sendTelegramVideo(videoTask.output[0], caption);
-    
-  } catch(e) {
-    await sendTelegram(`❌ Error: ${e.message}`);
-  }
-}
