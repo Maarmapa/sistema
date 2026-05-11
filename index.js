@@ -225,7 +225,8 @@ async function pollTelegram() {
 
       if (msg === '/start' || msg === '/help') {
         await sendTelegram(`🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot\n\n<b>🎬 Mini Docu</b>\n/produce — Film con señales del mundo\n/tema [tema] — Video temático\n/films — Films producidos\n\n<b>🛍️ Boykot Factory</b>\n/url [url] — Video de producto boykot.cl
-/docu-boykot [marca] — Mini film de marca (angelus/copic/molotow/holbein)\n/boykot-top — Top productos en stock\n/boykot-liquidacion — Últimas unidades\n/boykot-marcas — Por marcas top\n\nPowered by Runway + maarmapa.eth`);
+/docu-boykot [marca] — Mini film de marca
+/marca [marca] [N] — Photoshoot masivo de marca (Gen-4 Image + Gen-4.5) (angelus/copic/molotow/holbein)\n/boykot-top — Top productos en stock\n/boykot-liquidacion — Últimas unidades\n/boykot-marcas — Por marcas top\n\nPowered by Runway + maarmapa.eth`);
       } else if (msg === '/produce') {
         await sendTelegram('🎬 Produciendo...');
         produce();
@@ -245,6 +246,15 @@ async function pollTelegram() {
         const brand = msg.replace('/docu-boykot', '').trim() || 'default';
         await sendTelegram('🎬 Iniciando Docu Boykot: ' + brand + '...');
         runDocuBoykot(brand);
+      } else if (msg.startsWith('/marca ')) {
+        const parts = msg.replace('/marca ', '').trim().split(' ');
+        const brand = parts[0] || 'angelus';
+        const limit = parseInt(parts[1]) || 5;
+        await sendTelegram('🏷️ Generando photoshoot de ' + brand + '...');
+        runMarcaFactory(brand, limit);
+      } else if (msg === '/copic-award') {
+        await sendTelegram('🏆 Generando Copic Award 2026...');
+        runCopicAward();
       } else if (msg === '/boykot-top') {
         await sendTelegram('🛍️ Generando top productos Boykot...');
         runBoykotFactory('top', 3);
@@ -443,4 +453,151 @@ async function runDocuBoykot(brand = 'default') {
   }
 
   await sendTelegram(`✅ <b>Docu Boykot: ${brand.toUpperCase()} completo</b>\n🎬 ${scenes.length} escenas generadas\n\nPowered by Runway Gen-4 + maarmapa.eth`);
+}
+
+// ── MARCA FACTORY — catálogo + scraping + Gen-4 Image + Gen-4.5 ──
+async function runMarcaFactory(marca, limit = 5) {
+  console.log(`\n🏷️ MARCA FACTORY — ${marca} x${limit}`);
+  await sendTelegram(`🏷️ <b>Marca Factory: ${marca.toUpperCase()}</b>\nTop ${limit} productos · Generando photoshoot...`);
+
+  // Filter catalog by brand name
+  const catalog = loadCatalog();
+  const marcaLower = marca.toLowerCase();
+  const products = catalog
+    .filter(p => {
+      const name = (p.name + ' ' + (p.variants?.[0]?.description || '')).toLowerCase();
+      return name.includes(marcaLower);
+    })
+    .filter(p => p.variants?.some(v => v.stock > 0))
+    .sort((a, b) => {
+      const stockA = a.variants?.reduce((s, v) => s + (v.stock || 0), 0) || 0;
+      const stockB = b.variants?.reduce((s, v) => s + (v.stock || 0), 0) || 0;
+      return stockB - stockA;
+    })
+    .slice(0, limit);
+
+  if (!products.length) {
+    await sendTelegram(`❌ No se encontraron productos de <b>${marca}</b> en stock`);
+    return;
+  }
+
+  await sendTelegram(`📦 ${products.length} productos encontrados:\n${products.map(p => `• ${p.name.trim()}`).join('\n')}`);
+
+  for (let i = 0; i < products.length; i++) {
+    const product = products[i];
+    const productName = product.name.trim();
+    const variant = product.variants?.find(v => v.stock > 0) || product.variants?.[0];
+    const variantDesc = variant?.description || productName;
+
+    await sendTelegram(`⏳ ${i+1}/${products.length}: <b>${productName}</b>`);
+
+    try {
+      // Search boykot.cl for product image
+      const searchUrl = `https://www.boykot.cl/?s=${encodeURIComponent(productName)}`;
+      const searchRes = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
+      const searchHtml = await searchRes.text();
+      const imgMatch = searchHtml.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/);
+      const productImg = imgMatch ? imgMatch[0].replace(/-\d+x\d+\./, '.') : null;
+
+      if (productImg) await sendTelegramPhoto(productImg, `📸 ${productName}`);
+
+      // Gen-4 Image — editorial render
+      const refImages = productImg ? [{ uri: productImg, weight: 0.92 }] : [];
+      const imageTask = await runway.textToImage.create({
+        model: 'gen4_image',
+        promptText: `Professional editorial product photoshoot of ${variantDesc} by ${marca}, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal studio, product clearly visible, high contrast, photorealistic, no people, no text`,
+        ratio: '1920:1080',
+        ...(refImages.length ? { referenceImages: refImages } : {}),
+      }).waitForTaskOutput();
+
+      const renderUrl = imageTask.output[0];
+      await sendTelegramPhoto(renderUrl, `🎨 Render: ${productName}`);
+
+      // Gen-4.5 — cinematic video
+      const videoTask = await runway.imageToVideo.create({
+        model: 'gen4_turbo',
+        promptImage: renderUrl,
+        promptText: `Slow cinematic product presentation, ${variantDesc}, elegant 360 rotation, dramatic studio lighting sweeps across product surface, black background, acid yellow light accent, commercial quality`,
+        duration: 5,
+        ratio: '1280:720',
+      }).waitForTaskOutput();
+
+      const caption = `🎬 <b>${productName}</b>\n📦 ${product.category || marca}\n\n🛒 boykot.cl\n#boykot #${marcaLower} #artesupplies #chile`;
+      await sendTelegramVideo(videoTask.output[0], caption);
+
+      await new Promise(r => setTimeout(r, 5000));
+
+    } catch(e) {
+      await sendTelegram(`❌ Error en ${productName}: ${e.message}`);
+    }
+  }
+
+  await sendTelegram(`✅ <b>Marca Factory: ${marca.toUpperCase()} completo</b>\n🎬 ${products.length} productos generados\n\nboykot.cl · Powered by Runway + SISTEMA`);
+}
+
+// ── COPIC AWARD DOCU ──────────────────────────────────────────
+async function runCopicAward() {
+  console.log('\n🏆 COPIC AWARD DOCU');
+  await sendTelegram(`🏆 <b>Copic Award Chile 2026</b>\nGenerando contenido del concurso...`);
+
+  const scenes = [
+    {
+      title: "El Trazo Ganador",
+      narration: "Chile demostró su talento. Sweet Coffee ganó el Copic Award 2025.",
+      imgRef: "https://www.boykot.cl/wp-content/uploads/2025/12/Sweet-coffee-731x1024.jpg",
+      prompt: "Cinematic macro of Copic marker drawing on paper, vibrant colors bleeding into white surface, artistic illustration style, warm cafe tones, soft dramatic lighting, no people, no text, photorealistic",
+      motion: "Slow zoom into illustration details, colors shimmer, paper texture visible, warm golden light, cinematic",
+    },
+    {
+      title: "La Comunidad Crea",
+      narration: "Artistas de todo Chile. Un solo lenguaje: los marcadores Copic.",
+      imgRef: "https://www.boykot.cl/wp-content/uploads/2025/12/Fondo-copic-1024x636.jpg",
+      prompt: "Flat lay of multiple Copic markers arranged artistically on dark surface, scattered paper with colorful illustrations, artistic composition, dramatic rim lighting, acid yellow accent, minimal studio",
+      motion: "Slow orbital camera around Copic markers, light catches barrel surfaces, elegant rotation, cinematic commercial quality",
+    },
+    {
+      title: "Copic Award 2026",
+      narration: "Mayo 1 – Junio 30, 2026. La convocatoria está abierta. ¿Participas?",
+      imgRef: "https://www.boykot.cl/wp-content/uploads/2023/06/copic-chile-768x492.webp",
+      prompt: "Professional studio shot of Copic Sketch marker set, black background #000000, acid yellow #CCFF00 dramatic rim lighting, product floating in space, ultra minimal, premium quality, no text, no people",
+      motion: "Copic marker set slowly rotates in darkness, yellow rim light sweeps across, premium commercial presentation, slow reveal",
+    },
+  ];
+
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = scenes[i];
+    await sendTelegram(`⏳ Escena ${i+1}/3: <b>${scene.title}</b>\n<i>${scene.narration}</i>`);
+
+    try {
+      // Gen-4 Image con imagen real de referencia
+      const imageTask = await runway.textToImage.create({
+        model: 'gen4_image',
+        promptText: scene.prompt,
+        ratio: '1920:1080',
+        referenceImages: [{ uri: scene.imgRef, weight: 0.8 }],
+      }).waitForTaskOutput();
+
+      const renderUrl = imageTask.output[0];
+      await sendTelegramPhoto(renderUrl, `🎨 ${scene.title}`);
+
+      // Gen-4.5 — video
+      const videoTask = await runway.imageToVideo.create({
+        model: 'gen4_turbo',
+        promptImage: renderUrl,
+        promptText: scene.motion,
+        duration: 5,
+        ratio: '1280:720',
+      }).waitForTaskOutput();
+
+      const caption = `🏆 <b>${scene.title}</b>\n\n<i>"${scene.narration}"</i>\n\n📅 Copic Award 2026: Mayo 1 – Junio 30\n🛒 Copic Markers en boykot.cl\n#copicaward2026 #copic #boykot #artechileno`;
+      await sendTelegramVideo(videoTask.output[0], caption);
+
+      await new Promise(r => setTimeout(r, 5000));
+
+    } catch(e) {
+      await sendTelegram(`❌ Error escena ${i+1}: ${e.message}`);
+    }
+  }
+
+  await sendTelegram(`✅ <b>Copic Award 2026 content listo</b>\n🎬 3 videos generados\n\n📅 Inscripciones abiertas Mayo 1\n🔗 copicaward.com · boykot.cl`);
 }
