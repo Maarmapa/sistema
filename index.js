@@ -1,4 +1,5 @@
 import RunwayML from '@runwayml/sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import cron from 'node-cron';
 import fetch from 'node-fetch';
 import { createServer } from 'http';
@@ -8,7 +9,10 @@ import path from 'path';
 const runway = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET });
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'REVOKED_TOKEN';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1244921942';
+const RUNWAY_KEY = process.env.RUNWAYML_API_SECRET;
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
+// ── TELEGRAM ──────────────────────────────────────────────────
 async function sendTelegram(text) {
   await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
     method: 'POST',
@@ -25,90 +29,197 @@ async function sendTelegramVideo(videoUrl, caption) {
   });
 }
 
-// ── PROMPT ENGINE ─────────────────────────────────────────────
-const PROMPT_TEMPLATES = {
-  default: [
-    {
-      title: "Explosión Pigmento",
-      visual_prompt: "Extreme slow motion macro: single drop of vivid magenta watercolor hitting white paper, pigment exploding outward in perfect fractal patterns, black background, 4K cinematic, no camera movement",
-      caption: "El pigmento nunca miente. 🎨 #acuarela #boykot #arte"
-    },
-    {
-      title: "El Pincel Ataca",
-      visual_prompt: "Ultra slow motion: thick bristle brush loaded with cobalt blue paint striking white canvas, paint splattering in all directions, droplets suspended mid-air, dramatic side lighting, black background, macro lens",
-      caption: "Cada trazo es una decisión. 🖌️ #pincel #boykot #arte"
-    },
-    {
-      title: "Nacimiento del Color",
-      visual_prompt: "Time lapse macro: multiple ink drops falling into clear water tank, crimson red meets electric yellow blooming underwater, colors colliding in slow motion, studio lighting, black background",
-      caption: "El color nace solo. 🌈 #tinta #acuarela #boykot"
-    }
-  ],
-  catalogo: [
-    {
-      title: "Holbein Macro",
-      visual_prompt: "Extreme macro: Holbein watercolor tube being squeezed, vivid yellow paint emerging in slow motion, coiling and blooming on white surface, black studio background, cinematic 4K",
-      caption: "Holbein — el estándar japonés. Disponible en boykot.cl 🇯🇵 #holbein #acuarela"
-    },
-    {
-      title: "Princeton en Acción",
-      visual_prompt: "Ultra slow motion macro: professional paint brush bristles splaying open underwater, loaded with crimson red paint, ink dispersing in perfect fan pattern, dark background, studio lighting",
-      caption: "Princeton Velvetouch — precisión total. boykot.cl 🖌️ #princeton #pincel"
-    },
-    {
-      title: "Fabriano Texture",
-      visual_prompt: "Extreme close up: watercolor paint being absorbed into cotton paper fibers in real time, blue pigment bleeding through paper texture, macro lens pulling back slowly, warm studio lighting",
-      caption: "Fabriano 300g — donde el arte respira. boykot.cl #fabriano #papel"
-    }
-  ],
-};
+async function sendTelegramPhoto(url, caption) {
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, photo: url, caption, parse_mode: 'HTML' }),
+  });
+}
 
-function getScreenplay(theme) {
-  if (!theme) return PROMPT_TEMPLATES.default;
-  if (theme === 'catalogo' || theme === 'art supplies') return PROMPT_TEMPLATES.catalogo;
+// ── BOYKOT CATALOG ────────────────────────────────────────────
+function loadCatalog() {
+  try {
+    const raw = fs.readFileSync('./catalog.json', 'utf8');
+    return JSON.parse(raw);
+  } catch(e) {
+    console.error('Catalog not found:', e.message);
+    return [];
+  }
+}
 
-  // Dynamic theme — modify base prompts
+function getProducts(catalog, mode = 'top', limit = 3) {
+  let products = catalog.filter(p => p.name && p.name.trim() !== '');
+  if (mode === 'liquidacion') {
+    products = products.filter(p => p.variants?.some(v => v.stock > 0 && v.stock <= 5));
+  } else if (mode === 'instock') {
+    products = products.filter(p => p.variants?.some(v => v.stock > 0));
+  } else if (mode === 'marcas') {
+    const brands = {};
+    products.forEach(p => {
+      const brand = p.variants?.[0]?.description?.split(' ')[0] || 'Boykot';
+      if (!brands[brand]) brands[brand] = [];
+      brands[brand].push(p);
+    });
+    return Object.entries(brands)
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, 3)
+      .flatMap(([, prods]) => prods.slice(0, 1));
+  }
+  return products.sort(() => Math.random() - 0.5).slice(0, limit);
+}
+
+async function generateProductImage(prompt) {
+  const res = await fetch('https://api.dev.runwayml.com/v1/text_to_image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RUNWAY_KEY}`, 'X-Runway-Version': '2024-11-06' },
+    body: JSON.stringify({ model: 'gpt_image_2', promptText: prompt, ratio: '1920:1920' }),
+  });
+  const d = await res.json();
+  if (!d.id) throw new Error(JSON.stringify(d).slice(0, 100));
+  for (let i = 0; i < 24; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const poll = await fetch(`https://api.dev.runwayml.com/v1/tasks/${d.id}`, {
+      headers: { 'Authorization': `Bearer ${RUNWAY_KEY}`, 'X-Runway-Version': '2024-11-06' },
+    });
+    const t = await poll.json();
+    if (t.status === 'SUCCEEDED') return t.output?.[0];
+    if (t.status === 'FAILED') throw new Error('Image failed');
+  }
+  throw new Error('Image timeout');
+}
+
+async function generateProductVideo(imageUrl, prompt) {
+  const task = await runway.imageToVideo.create({
+    model: 'gen4_turbo',
+    promptImage: imageUrl,
+    promptText: prompt,
+    duration: 5,
+    ratio: '1280:720',
+  });
+  let result = task;
+  while (result.status !== 'SUCCEEDED' && result.status !== 'FAILED') {
+    await new Promise(r => setTimeout(r, 3000));
+    result = await runway.tasks.retrieve(task.id);
+  }
+  if (result.status === 'FAILED') throw new Error('Video failed');
+  return result.output[0];
+}
+
+async function runBoykotFactory(mode = 'top', limit = 3) {
+  console.log(`\n🛍️ BOYKOT FACTORY — mode: ${mode}`);
+  await sendTelegram(`🛍️ <b>Boykot Factory</b>\nModo: ${mode} · ${limit} productos`);
+
+  const catalog = loadCatalog();
+  if (!catalog.length) { await sendTelegram('❌ Catálogo no disponible'); return; }
+
+  const products = getProducts(catalog, mode, limit);
+  if (!products.length) { await sendTelegram('❌ No hay productos para este modo'); return; }
+
+  await sendTelegram(`📦 Productos:\n${products.map(p => `• ${p.name}`).join('\n')}`);
+
+  for (const product of products) {
+    await sendTelegram(`⏳ Generando: <b>${product.name}</b>...`);
+    try {
+      const imgPrompt = `Editorial product photo of ${product.name} art supply, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal, high contrast, professional studio, no people, no text`;
+      const vidPrompt = `Slow cinematic product reveal, ${product.name} rotates gently, dramatic studio lighting sweeps across surface, black background, yellow light accent`;
+      const caption = `<b>${product.name}</b>\n${product.category ? '📁 ' + product.category : ''}\n\nDisponible en boykot.cl 🎨\n#boykot #artesupplies #chile${mode === 'liquidacion' ? '\n🔥 ÚLTIMAS UNIDADES' : ''}`;
+
+      const imgUrl = await generateProductImage(imgPrompt);
+      await sendTelegramPhoto(imgUrl, `📸 ${product.name}`);
+
+      const vidUrl = await generateProductVideo(imgUrl, vidPrompt);
+      await sendTelegramVideo(vidUrl, caption);
+
+      await new Promise(r => setTimeout(r, 8000));
+    } catch(e) {
+      await sendTelegram(`❌ Error en ${product.name}: ${e.message}`);
+    }
+  }
+  await sendTelegram(`✅ <b>Boykot Factory listo</b> — ${products.length} productos`);
+}
+
+// ── MINI DOCU ─────────────────────────────────────────────────
+async function getWorldSignals() {
+  try {
+    const res = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
+    const ids = await res.json();
+    const stories = await Promise.all(ids.slice(0, 5).map(async id => {
+      const r = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`);
+      return r.json();
+    }));
+    return stories.filter(s => s?.title).map(s => s.title).join('\n');
+  } catch { return 'Technology evolves. Cities breathe. Art persists.'; }
+}
+
+function getTestScreenplay(theme) {
   return [
     {
-      title: `${theme} — Explosión`,
-      visual_prompt: `Extreme slow motion macro: ${theme} concept visualized as vivid paint explosion on black background, single dominant color burst, fractal patterns, 4K cinematic`,
-      caption: `${theme} en estado puro. 🎨 #boykot #arte`
+      title: "El Color Emerge",
+      visual_prompt: `Extreme slow motion macro: ${theme || 'vivid magenta'} watercolor drop exploding on black background, fractal pigment patterns, 4K cinematic`,
+      caption: "El color tiene vida propia. 🎨 #acuarela #boykot #arte"
     },
     {
-      title: `${theme} — Flujo`,
-      visual_prompt: `Ultra slow motion: liquid paint representing ${theme}, flowing and morphing in zero gravity, jewel-toned colors against black background, macro lens, dramatic studio lighting`,
-      caption: `El flujo de ${theme}. 🖌️ #boykot #arte`
+      title: "La Textura del Arte",
+      visual_prompt: "Close up of watercolor paper texture, brush strokes in slow motion, golden light catching paper grain, cinematic macro",
+      caption: "La textura importa. #fabriano #acuarela #boykot"
     },
     {
-      title: `${theme} — Impacto`,
-      visual_prompt: `Time lapse macro: ${theme} expressed through ink drops colliding in water tank, violent color explosion underwater, complementary colors mixing, studio lighting, cinematic`,
-      caption: `${theme} — sin filtros. 🌈 #boykot #arte`
+      title: "Pincel y Destino",
+      visual_prompt: `Artist brush tip loading with ${theme || 'vibrant red'} paint, droplets in slow motion, dark moody background, cinematic`,
+      caption: "Cada trazo es una decisión. 🖌️ #pincel #arte #boykot"
     }
   ];
 }
 
-async function generateScene(scene, model = 'gen4_turbo') {
-  console.log(`🎬 ${scene.title} [${model}]`);
-  
+async function generateScene(scene) {
+  console.log(`🎬 ${scene.title}`);
   const task = await runway.imageToVideo.create({
-    model,
+    model: 'gen4_turbo',
     promptImage: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
     promptText: scene.visual_prompt,
     duration: 5,
     ratio: '1280:720',
   });
-
   let result = task;
   while (result.status !== 'SUCCEEDED' && result.status !== 'FAILED') {
     await new Promise(r => setTimeout(r, 3000));
     result = await runway.tasks.retrieve(task.id);
     console.log(`  ${result.status}`);
   }
-
   if (result.status === 'FAILED') throw new Error(`Failed: ${scene.title}`);
   return result.output[0];
 }
 
+async function produce(theme = null) {
+  const date = new Date().toISOString().split('T')[0];
+  console.log(`\n🎥 SISTEMA — ${date} | ${theme || 'default'}`);
+  try {
+    await sendTelegram(`🎬 <b>SISTEMA produciendo</b>\n📅 ${date}${theme ? `\n🎨 Tema: ${theme}` : ''}`);
+    const screenplay = getTestScreenplay(theme);
+    const scenes = [];
+    for (const scene of screenplay) {
+      await sendTelegram(`⏳ <b>${scene.title}</b>...`);
+      try {
+        const videoUrl = await generateScene(scene);
+        scenes.push({ ...scene, videoUrl });
+        await sendTelegramVideo(videoUrl, `🎬 <b>${scene.title}</b>\n${scene.caption}\n\n<i>SISTEMA · maarmapa.eth</i>`);
+      } catch (err) {
+        await sendTelegram(`❌ Error: ${err.message}`);
+      }
+    }
+    const dir = './films';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    const filename = `${date}${theme ? '-'+theme.slice(0,20).replace(/\s+/g,'-') : ''}.json`;
+    fs.writeFileSync(path.join(dir, filename), JSON.stringify({ date, theme, scenes }, null, 2));
+    await sendTelegram(`✅ <b>${scenes.length} videos listos</b>`);
+  } catch (err) {
+    console.error('❌', err);
+    await sendTelegram(`❌ Error: ${err.message}`);
+  }
+}
+
+// ── TELEGRAM BOT ──────────────────────────────────────────────
 let lastUpdateId = 0;
 async function pollTelegram() {
   try {
@@ -121,13 +232,10 @@ async function pollTelegram() {
       console.log(`📱 ${msg}`);
 
       if (msg === '/start' || msg === '/help') {
-        await sendTelegram(`🎥 <b>SISTEMA</b> — Director autónomo\n\nComandos:\n/produce — Film con señales del mundo\n/catalogo — Videos catálogo Boykot\n/tema [tema] — Video temático\n/films — Films producidos\n\nPowered by Runway Gen-4.5 + maarmapa.eth`);
+        await sendTelegram(`🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot\n\n<b>🎬 Mini Docu</b>\n/produce — Film con señales del mundo\n/tema [tema] — Video temático\n/films — Films producidos\n\n<b>🛍️ Boykot Factory</b>\n/boykot-top — Top productos en stock\n/boykot-liquidacion — Productos últimas unidades\n/boykot-marcas — Por marcas top\n/boykot [N] — N productos random\n\nPowered by Runway + maarmapa.eth`);
       } else if (msg === '/produce') {
         await sendTelegram('🎬 Produciendo...');
         produce();
-      } else if (msg === '/catalogo') {
-        await sendTelegram('🛍️ Generando catálogo Boykot...');
-        produce('catalogo');
       } else if (msg.startsWith('/tema ')) {
         const theme = msg.replace('/tema ', '').trim();
         await sendTelegram(`🎨 Tema: <b>${theme}</b>`);
@@ -136,6 +244,18 @@ async function pollTelegram() {
         const dir = './films';
         const films = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
         await sendTelegram(films.length ? `🎬 Films:\n${films.map(f=>`• ${f.replace('.json','')}`).join('\n')}` : 'No hay films. Usa /produce');
+      } else if (msg === '/boykot-top') {
+        await sendTelegram('🛍️ Generando top productos Boykot...');
+        runBoykotFactory('top', 3);
+      } else if (msg === '/boykot-liquidacion') {
+        await sendTelegram('🔥 Generando liquidación Boykot...');
+        runBoykotFactory('liquidacion', 3);
+      } else if (msg === '/boykot-marcas') {
+        await sendTelegram('🎨 Generando por marcas Boykot...');
+        runBoykotFactory('marcas', 3);
+      } else if (msg.startsWith('/boykot ')) {
+        const n = parseInt(msg.replace('/boykot ', '')) || 3;
+        runBoykotFactory('top', n);
       }
     }
   } catch (err) {
@@ -143,39 +263,14 @@ async function pollTelegram() {
   }
 }
 
-async function produce(theme = null) {
-  const date = new Date().toISOString().split('T')[0];
-  console.log(`\n🎥 SISTEMA — ${date} | ${theme || 'default'}`);
-  try {
-    await sendTelegram(`🎬 <b>SISTEMA produciendo</b>\n📅 ${date}${theme ? `\n🎨 Tema: ${theme}` : ''}`);
-    const screenplay = getScreenplay(theme);
-    const scenes = [];
-
-    for (const scene of screenplay) {
-      await sendTelegram(`⏳ <b>${scene.title}</b>...`);
-      try {
-        const videoUrl = await generateScene(scene);
-        scenes.push({ ...scene, videoUrl });
-        await sendTelegramVideo(videoUrl, `🎬 <b>${scene.title}</b>\n${scene.caption}\n\n<i>SISTEMA · maarmapa.eth · Powered by Runway</i>`);
-      } catch (err) {
-        await sendTelegram(`❌ Error: ${err.message}`);
-      }
-    }
-
-    const dir = './films';
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
-    const filename = `${date}${theme ? '-'+theme.slice(0,20).replace(/\s+/g,'-') : ''}.json`;
-    fs.writeFileSync(path.join(dir, filename), JSON.stringify({ date, theme, scenes }, null, 2));
-    await sendTelegram(`✅ <b>${scenes.length} videos listos</b>`);
-  } catch (err) {
-    console.error('❌', err);
-    await sendTelegram(`❌ Error: ${err.message}`);
-  }
-}
-
+// ── SCHEDULER ─────────────────────────────────────────────────
 cron.schedule('0 3 * * *', () => produce());
+cron.schedule('0 10 * * *', () => runBoykotFactory('top', 3));
+cron.schedule('0 16 * * *', () => runBoykotFactory('liquidacion', 3));
+
 setInterval(pollTelegram, 3000);
 
+// ── HTTP SERVER ───────────────────────────────────────────────
 const server = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   if (req.method === 'GET' && req.url === '/health') {
@@ -189,6 +284,15 @@ const server = createServer(async (req, res) => {
       res.writeHead(202);
       res.end(JSON.stringify({ message: 'Production started', theme: theme || null }));
       produce(theme);
+    });
+  } else if (req.method === 'POST' && req.url === '/boykot') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      const { mode, limit } = body ? JSON.parse(body) : {};
+      res.writeHead(202);
+      res.end(JSON.stringify({ message: 'Boykot factory started', mode: mode || 'top' }));
+      runBoykotFactory(mode || 'top', limit || 3);
     });
   } else if (req.method === 'GET' && req.url === '/films') {
     const dir = './films';
@@ -205,4 +309,5 @@ const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`🎥 SISTEMA on port ${PORT}`);
   console.log('📱 Telegram: @Maarmapabot');
+  console.log('🛍️ Boykot Factory: /boykot-top /boykot-liquidacion /boykot-marcas');
 });
