@@ -108,7 +108,8 @@ async function runBoykotUrl(productUrl) {
     // Gen-4 Image — render editorial
     const imageTask = await runway.textToImage.create({
       model: 'gen4_image',
-      promptText: `Professional editorial product render of ${productName} art supply, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal studio, high contrast, photorealistic, no people, no text`,
+      promptText: `Professional editorial product render, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal studio, high contrast, same product exact shape and colors, photorealistic, no people, no text`,
+      referenceImages: [{ uri: imgUrl, weight: 0.85 }],
       ratio: '1920:1080',
     }).waitForTaskOutput();
 
