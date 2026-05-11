@@ -374,9 +374,12 @@ async function scrapeProductImage(url) {
   try {
     const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
     const html = await res.text();
-    const imgMatch = html.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/);
-    if (!imgMatch) return null;
-    return imgMatch[0].replace(/-\d+x\d+\./, '.');
+    // Get all product images (WooCommerce thumbnails have -NxN suffix)
+    const matches = [...html.matchAll(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+?-\d+x\d+\.(jpg|jpeg|png|webp)/g)];
+    const productImgs = matches
+      .map(m => m[0].replace(/-\d+x\d+(?=\.(jpg|jpeg|png|webp))/, ''))
+      .filter(u => !u.includes('logo') && !u.includes('banner') && !u.includes('favicon') && !u.includes('header'));
+    return productImgs[0] || null;
   } catch(e) {
     return null;
   }
@@ -492,12 +495,25 @@ async function runMarcaFactory(marca, limit = 5) {
     await sendTelegram(`⏳ ${i+1}/${products.length}: <b>${productName}</b>`);
 
     try {
-      // Search boykot.cl for product image
-      const searchUrl = `https://www.boykot.cl/?s=${encodeURIComponent(productName)}`;
-      const searchRes = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
-      const searchHtml = await searchRes.text();
-      const imgMatch = searchHtml.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/);
-      const productImg = imgMatch ? imgMatch[0].replace(/-\d+x\d+\./, '.') : null;
+      // Search boykot.cl for product image - use brand category page first
+      const BRAND_CATEGORY_URLS = {
+        angelus: 'https://boykot.cl/pinturas-angelus/',
+        copic: 'https://boykot.cl/copic-chile/',
+        molotow: 'https://boykot.cl/molotow-chile/',
+        holbein: 'https://www.boykot.cl/holbein-chile/',
+      };
+      const categoryUrl = BRAND_CATEGORY_URLS[marcaLower] || `https://www.boykot.cl/?s=${encodeURIComponent(productName)}`;
+      const searchUrl = `https://www.boykot.cl/?s=${encodeURIComponent(variantDesc || productName)}`;
+      let productImg = null;
+      try {
+        const searchRes = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
+        const searchHtml = await searchRes.text();
+        const matches = [...searchHtml.matchAll(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+?-\d+x\d+\.(jpg|jpeg|png|webp)/g)];
+        const imgs = matches
+          .map(m => m[0].replace(/-\d+x\d+(?=\.(jpg|jpeg|png|webp))/, ''))
+          .filter(u => !u.includes('logo') && !u.includes('banner') && !u.includes('favicon') && !u.includes('header'));
+        productImg = imgs[0] || null;
+      } catch(e) { productImg = null; }
 
       if (productImg) await sendTelegramPhoto(productImg, `📸 ${productName}`);
 
