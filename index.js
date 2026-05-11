@@ -403,9 +403,9 @@ async function runDocuBoykot(brand = 'default') {
         // Use real product image as reference
         const imageTask = await runway.textToImage.create({
           model: 'gen4_image',
-          promptText: `Cinematic editorial: ${scene.motion}. Black background, dramatic lighting, photorealistic, no text, no people`,
+          promptText: `Cinematic editorial product shot: ${scene.motion}. The product must remain clearly visible and recognizable. Black background, dramatic rim lighting, photorealistic, no text, no people`,
           ratio: '1920:1080',
-          referenceImages: [{ uri: productImg, weight: 0.75 }],
+          referenceImages: [{ uri: productImg, weight: 0.92 }],
         }).waitForTaskOutput();
 
         const renderUrl = imageTask.output[0];
