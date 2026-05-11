@@ -503,29 +503,44 @@ async function runMarcaFactory(marca, limit = 5) {
 
       // Gen-4 Image — editorial render
       const refImages = productImg ? [{ uri: productImg, weight: 0.92 }] : [];
-      const imageTask = await runway.textToImage.create({
+      const imageTaskCreate = await runway.textToImage.create({
         model: 'gen4_image',
         promptText: `Professional editorial product photoshoot of ${variantDesc} by ${marca}, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal studio, product clearly visible, high contrast, photorealistic, no people, no text`,
         ratio: '1920:1080',
         ...(refImages.length ? { referenceImages: refImages } : {}),
-      }).waitForTaskOutput();
-
+      });
+      let imageTask = imageTaskCreate;
+      for (let p = 0; p < 30; p++) {
+        if (imageTask.status === 'SUCCEEDED') break;
+        if (imageTask.status === 'FAILED') throw new Error('Image generation failed');
+        await new Promise(r => setTimeout(r, 5000));
+        imageTask = await runway.tasks.retrieve(imageTaskCreate.id);
+      }
+      if (imageTask.status !== 'SUCCEEDED') throw new Error('Image timeout');
       const renderUrl = imageTask.output[0];
       await sendTelegramPhoto(renderUrl, `🎨 Render: ${productName}`);
 
       // Gen-4.5 — cinematic video
-      const videoTask = await runway.imageToVideo.create({
+      const videoCreate = await runway.imageToVideo.create({
         model: 'gen4_turbo',
         promptImage: renderUrl,
         promptText: `Slow cinematic product presentation, ${variantDesc}, elegant 360 rotation, dramatic studio lighting sweeps across product surface, black background, acid yellow light accent, commercial quality`,
         duration: 5,
         ratio: '1280:720',
-      }).waitForTaskOutput();
+      });
+      let videoTask = videoCreate;
+      for (let p = 0; p < 30; p++) {
+        if (videoTask.status === 'SUCCEEDED') break;
+        if (videoTask.status === 'FAILED') throw new Error('Video generation failed');
+        await new Promise(r => setTimeout(r, 5000));
+        videoTask = await runway.tasks.retrieve(videoCreate.id);
+      }
+      if (videoTask.status !== 'SUCCEEDED') throw new Error('Video timeout');
 
       const caption = `🎬 <b>${productName}</b>\n📦 ${product.category || marca}\n\n🛒 boykot.cl\n#boykot #${marcaLower} #artesupplies #chile`;
       await sendTelegramVideo(videoTask.output[0], caption);
 
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 15000));
 
     } catch(e) {
       await sendTelegram(`❌ Error en ${productName}: ${e.message}`);
