@@ -13,6 +13,15 @@ const ALLOWED_CHAT_IDS = new Set(
   (process.env.ALLOWED_CHAT_IDS || TELEGRAM_CHAT_ID)
     .split(',').map(s => Number(s.trim())).filter(Boolean)
 );
+const PRODUCE_AUTH_TOKEN = process.env.PRODUCE_AUTH_TOKEN;
+function requireAuth(req, res) {
+  if (!PRODUCE_AUTH_TOKEN || req.headers['x-auth-token'] !== PRODUCE_AUTH_TOKEN) {
+    res.writeHead(401);
+    res.end(JSON.stringify({ error: 'unauthorized' }));
+    return false;
+  }
+  return true;
+}
 function logAccess(message, authorized) {
   const f = message.from || {};
   console.log('[ACCESS] ' + JSON.stringify({
@@ -306,6 +315,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(200);
     res.end(JSON.stringify({ status: 'SISTEMA online', time: new Date().toISOString() }));
   } else if (req.method === 'POST' && req.url === '/produce') {
+    if (!requireAuth(req, res)) return;
     let body = '';
     req.on('data', d => body += d);
     req.on('end', () => {
@@ -315,6 +325,7 @@ const server = createServer(async (req, res) => {
       produce(theme);
     });
   } else if (req.method === 'POST' && req.url === '/boykot') {
+    if (!requireAuth(req, res)) return;
     let body = '';
     req.on('data', d => body += d);
     req.on('end', () => {
