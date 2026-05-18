@@ -6,9 +6,26 @@ import fs from 'fs';
 import path from 'path';
 
 const runway = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET });
-const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'REVOKED_TOKEN';
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1244921942';
 const RUNWAY_KEY = process.env.RUNWAYML_API_SECRET;
+const ALLOWED_CHAT_IDS = new Set(
+  (process.env.ALLOWED_CHAT_IDS || TELEGRAM_CHAT_ID)
+    .split(',').map(s => Number(s.trim())).filter(Boolean)
+);
+function logAccess(message, authorized) {
+  const f = message.from || {};
+  console.log('[ACCESS] ' + JSON.stringify({
+    ts: new Date().toISOString(),
+    authorized,
+    chat_id: message.chat?.id,
+    user_id: f.id,
+    username: f.username || null,
+    first_name: f.first_name || null,
+    last_name: f.last_name || null,
+    text: (message.text || message.caption || '').slice(0, 200)
+  }));
+}
 
 // ── TELEGRAM ──────────────────────────────────────────────────
 async function sendTelegram(text) {
@@ -219,7 +236,11 @@ async function pollTelegram() {
     const data = await res.json();
     for (const update of data.result || []) {
       lastUpdateId = update.update_id;
-      const msg = update.message?.text;
+      if (!update.message) continue;
+      const authorized = ALLOWED_CHAT_IDS.has(update.message.chat?.id);
+      logAccess(update.message, authorized);
+      if (!authorized) continue; // silent drop — no confirmamos existencia del bot
+      const msg = update.message.text;
       if (!msg) continue;
       console.log(`📱 ${msg}`);
 
