@@ -297,7 +297,10 @@ async function pollTelegram() {
       }
     }
   } catch (err) {
-    console.error('Telegram error:', err.message);
+    // Redact bot token from URL embedded in node-fetch error messages
+    const raw = err.message || err.code || err.toString() || 'unknown';
+    const safe = raw.replace(/bot\d+:[\w-]+/g, 'bot<REDACTED>');
+    console.error('Telegram error:', safe);
   }
 }
 
@@ -306,7 +309,15 @@ cron.schedule('0 3 * * *', () => produce());
 cron.schedule('0 10 * * *', () => runBoykotFactory('top', 3));
 cron.schedule('0 16 * * *', () => runBoykotFactory('liquidacion', 3));
 
-setInterval(pollTelegram, 3000);
+// Sequential polling — one getUpdates at a time. Previous setInterval(pollTelegram, 3000)
+// caused self-conflict because Telegram allows only ONE active getUpdates per token at a time;
+// every overlapping poll was being killed and producing errors that LEAKED THE TOKEN to logs.
+(async function pollLoop() {
+  while (true) {
+    await pollTelegram();
+    await new Promise(r => setTimeout(r, 500));
+  }
+})();
 
 // ── HTTP SERVER ───────────────────────────────────────────────
 const server = createServer(async (req, res) => {
