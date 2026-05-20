@@ -88,17 +88,46 @@ const BRAND_PATTERNS = [
   { re: /\bsakura\b/i, brand: 'Sakura' },
   { re: /\bderwent\b/i, brand: 'Derwent' },
   { re: /\bposca\b/i, brand: 'Posca' },
+  // Expanded set (May 2026) — Boykot.cl additional brands
+  { re: /\bacrilex\b/i, brand: 'Acrilex' },
+  { re: /\bkuretake\b/i, brand: 'Kuretake' },
+  { re: /\bdaler[- ]?rowney\b/i, brand: 'Daler-Rowney' },
+  { re: /\bvallejo\b/i, brand: 'Vallejo' },
+  { re: /\barches\b/i, brand: 'Arches' },
+  { re: /\bcaran d['']?ache\b/i, brand: "Caran d'Ache" },
+  { re: /\bfaber[- ]?castell\b/i, brand: 'Faber-Castell' },
+  { re: /\bstaedtler\b/i, brand: 'Staedtler' },
+  { re: /\bschmincke\b/i, brand: 'Schmincke' },
+  { re: /\bdr\.?\s*ph\.?\s*martin/i, brand: 'Dr. Ph. Martin' },
+  { re: /\bliquitex\b/i, brand: 'Liquitex' },
+  { re: /\bmaimeri\b/i, brand: 'Maimeri' },
+  { re: /\bsennelier\b/i, brand: 'Sennelier' },
+  { re: /\bpilot\b/i, brand: 'Pilot' },
+  { re: /\bpentel\b/i, brand: 'Pentel' },
+  { re: /\bsharpie\b/i, brand: 'Sharpie' },
+  { re: /\bprismacolor\b/i, brand: 'Prismacolor' },
+  // Acuarela series → Holbein (common naming in catalog)
+  { re: /\bacuarela serie [a-d]/i, brand: 'Holbein' },
+  // Acryla gouache → Holbein
+  { re: /\bacryla\b/i, brand: 'Holbein' },
+  // Opaque White → Dr. Ph. Martin / Holbein common
+  // Doodle Pack → Copic Ciao
+  { re: /\bdoodle pack/i, brand: 'Copic' },
+  // Pincel + brand → typically Daler-Rowney or Holbein
+  { re: /\bpincel.*\bgraduate\b/i, brand: 'Daler-Rowney' },
 ];
 
 function detectBrand(product) {
   const haystack = [
     product.name || '',
     product.description || '',
+    product.category || '',
     ...(product.variants || []).map(v => v.description || ''),
   ].join(' ');
   for (const { re, brand } of BRAND_PATTERNS) {
     if (re.test(haystack)) return brand;
   }
+  // Final fallback: first word of variant description (often a brand)
   return product.variants?.[0]?.description?.split(' ')[0] || 'Boykot';
 }
 

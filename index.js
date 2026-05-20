@@ -421,6 +421,8 @@ async function findBoykotProductImage(product) {
       wcSku: wc.sku,
       matchedQuery: bestMatch.query,
       matchScore: bestScore,
+      priceRaw: wc.prices?.price || null, // string in cents (e.g. "9800" for CLP — no minor unit)
+      currency: wc.prices?.currency_code || 'CLP',
     };
   } catch (err) {
     console.error('[boykot-api] global err:', err.message);
@@ -430,16 +432,19 @@ async function findBoykotProductImage(product) {
 
 // ── BSALE FACTORY — sales-driven content with HOT/COLD/STAR classification ────
 function templateCaption(product, status, opts) {
-  const name = (product.name || 'Producto').trim();
+  const name = (opts.display_name || product.name || 'Producto').trim();
   const brand = opts.brand || 'Boykot';
   const tag = brand.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const priceLine = opts.price ? `\n💰 $${opts.price.toLocaleString('es-CL')} CLP` : '';
+  const urlLine = opts.product_url ? `\n🔗 ${opts.product_url}` : '\nboykot.cl';
+
   if (status === 'HOT') {
-    return `🔥 <b>${name}</b>\nVuelan los ${brand}. ${opts.units_sold_30d} unidades movidas en los últimos 30 días.\nQuedan ${opts.total_stock} en stock — al ritmo que van, no duran.\n\nboykot.cl\n#boykot #${tag} #arte #chile`;
+    return `🔥 <b>${name}</b>\nVuelan los ${brand}. ${opts.units_sold_30d} unidades movidas en los últimos 30 días.\nQuedan ${opts.total_stock} en stock — al ritmo que van, no duran.${priceLine}${urlLine}\n\n#boykot #${tag} #arte #chile`;
   }
   if (status === 'COLD') {
-    return `❄️ <b>${name}</b>\nLo redescubrimos. ${brand} acumulando polvo en el rincón, sin movimiento hace semanas.\n${opts.total_stock} unidades esperando que alguien las pruebe.\n\nboykot.cl\n#boykot #${tag} #arte #chile`;
+    return `❄️ <b>${name}</b>\nLo redescubrimos. ${brand} acumulando polvo en el rincón, sin movimiento hace semanas.\n${opts.total_stock} unidades esperando que alguien las pruebe.${priceLine}${urlLine}\n\n#boykot #${tag} #arte #chile`;
   }
-  return `⭐ <b>${name}</b>\nLos pintores saben. ${brand} en el top vendidos del mes — ${opts.units_sold_30d} unidades.\n\nboykot.cl\n#boykot #${tag} #arte #chile`;
+  return `⭐ <b>${name}</b>\nLos pintores saben. ${brand} en el top vendidos del mes — ${opts.units_sold_30d} unidades.${priceLine}${urlLine}\n\n#boykot #${tag} #arte #chile`;
 }
 
 async function llmCaption(product, status, opts) {
@@ -449,26 +454,29 @@ async function llmCaption(product, status, opts) {
     const tone = status === 'HOT' ? 'urgente, sentido de FOMO, vuela el stock'
                : status === 'COLD' ? 'poético, joya redescubierta, invita a probar'
                : 'triunfal, los favoritos del mes, social proof';
+    const priceLine = opts.price ? `Precio: $${opts.price.toLocaleString('es-CL')} CLP\n` : '';
+    const urlLine = opts.product_url ? `Link directo al producto: ${opts.product_url}\n` : '';
     const res = await anthropic.messages.create({
       model: 'claude-3-5-haiku-20241022',
-      max_tokens: 280,
+      max_tokens: 320,
       messages: [{
         role: 'user',
-        content: `Escribí UN caption para Instagram Reel de Boykot.cl (tienda de arte chilena online), tono ${tone}, 50-80 palabras, en español rioplatense/chileno neutro.
+        content: `Escribí UN caption para Instagram Reel de Boykot.cl (tienda de arte chilena online), tono ${tone}, 60-100 palabras, en español rioplatense/chileno neutro.
 
-Producto: ${(product.name || '').trim()}
+Producto: ${(opts.display_name || product.name || '').trim()}
 Marca: ${opts.brand}
 Status: ${status}
 Vendidos últimos 30 días: ${opts.units_sold_30d}
 Stock actual: ${opts.total_stock} unidades
-
+${priceLine}${urlLine}
 Reglas:
-- HTML válido para Telegram: sólo <b>negrita</b> y emojis están permitidos. NO <em>, <i>, <p>, ni otros tags.
-- Sin URLs en el cuerpo (cerrar con "boykot.cl" suelto)
-- Sin frases tipo "compralo ya", "no te lo pierdas" — sin hard sell
-- Que suene hecho a mano por un artista, no genérico de marketing
-- 3-5 hashtags al final
-- Sólo devolvé el caption, sin explicación previa.`,
+- HTML válido para Telegram: SOLO <b>negrita</b> y emojis. NO <em>, <i>, <p>, ni otros tags.
+- Mencioná el precio naturalmente UNA vez si te lo doy.
+- Cerrá el caption con el link directo al producto en línea separada (si lo tengo).
+- Sin frases tipo "compralo ya", "no te lo pierdas" — sin hard sell.
+- Que suene hecho a mano por un artista, no genérico de marketing.
+- 3-5 hashtags al final, incluyendo #boykot y la marca.
+- Devolvé SOLO el caption, sin explicación previa.`,
       }],
     });
     const text = res.content?.[0]?.text?.trim();
@@ -557,22 +565,35 @@ async function runBsaleFactory() {
           brand: product.brand,
           units_sold_30d: product.totalSold,
           total_stock: product.totalStock,
+          // Filled in after WC lookup
+          price: null,
+          currency: 'CLP',
+          product_url: null,
+          display_name: (product.name || '').trim(),
         };
         await sendTelegram(`${emoji} <b>${(product.name || '').trim()}</b> [${product.brand}]\nstock ${opts.total_stock} · 30d ${opts.units_sold_30d}\nGenerando ${status}...`);
 
-        // STEP 1: Find the REAL product image on boykot.cl via WC Store API (search by SKU).
+        // STEP 1: Find the REAL product image on boykot.cl via WC Store API.
         const realImage = await findBoykotProductImage(product);
         if (!realImage) {
-          await sendTelegram(`⚠️ ${emoji} <b>${(product.name || '').trim()}</b>\nNo está en boykot.cl (sku no match), skip — no posteamos slop`);
+          await sendTelegram(`⚠️ ${emoji} <b>${(product.name || '').trim()}</b>\nNo está en boykot.cl, skip — no posteamos slop`);
           console.log(`[bsale-factory] ${status} skip: ${product.name} not found on boykot.cl`);
           continue;
         }
 
-        // Display name from boykot.cl (cleaner than Bsale's) + show the real photo
-        const displayName = realImage.wcName || (product.name || '').trim();
-        await sendTelegramPhoto(realImage.url, `📸 ${emoji} ${displayName}\n${realImage.productPageUrl}`);
+        // Enrich opts with WC data (price, URL, clean display name)
+        opts.display_name = realImage.wcName || opts.display_name;
+        opts.product_url = realImage.productPageUrl;
+        if (realImage.priceRaw) {
+          const n = Number(realImage.priceRaw);
+          if (!Number.isNaN(n) && n > 0) opts.price = n;
+        }
 
-        // STEP 2: Generate caption (LLM with template fallback)
+        // Show the real photo (preview)
+        const priceLabel = opts.price ? `\n💰 $${opts.price.toLocaleString('es-CL')} CLP` : '';
+        await sendTelegramPhoto(realImage.url, `📸 ${emoji} <b>${opts.display_name}</b>${priceLabel}\n${realImage.productPageUrl}`);
+
+        // STEP 2: Generate caption (LLM with template fallback), now with price + URL context
         const caption = await llmCaption(product, status, opts);
 
         // STEP 3: Animate the REAL product image directly via Runway image-to-video.
