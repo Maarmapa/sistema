@@ -372,27 +372,37 @@ function letterbox9x16(sourceUrl, bg = '000000') {
 // This avoids text drift, which is the main failure mode of AI video diffusion
 // models (small letterforms like "B95", brand names get mangled when camera
 // pushes into the product or zooms onto text-bearing surfaces).
+// Motion prompts — TEXT, IDENTITY, and COLOR-FIDELITY preservation.
+// KEY PRINCIPLES (ranked by importance):
+// 1. Product LOCKED STATIONARY — no rotation, no orbit (would reveal unseen sides).
+// 2. Camera fixed at frontal angle.
+// 3. Product TRUE COLORS preserved — packaging colors stay as in source.
+//    Acid yellow accent lives in the BACKGROUND/AMBIENT only — does NOT
+//    tint, paint, or color the product surface itself.
+// 4. Motion lives in: background atmosphere, ambient particles, environmental
+//    light SOURCES visible in scene — never light sweeping across the product
+//    (which makes the model tint the product).
 const MOTION_PROMPTS = {
   HOT: [
-    'Product locked stationary at center, camera completely fixed at frontal angle, no rotation no orbit, dramatic acid yellow #CCFF00 light sweeps diagonally across the front surface from left to right, atmospheric particles drift past, motion ONLY in light and particles',
-    'Static product, camera fixed frontal, no product rotation, intense acid yellow strobe flashes from off-frame sides, atmospheric smoke swirls dynamically around the product, product surface unchanged throughout',
-    'Product perfectly centered and unmoving, camera locked frontal, no rotation, electric yellow neon rim light pulses on and off rapidly, motion blur trails of light bend around the product silhouette, atmosphere alive',
-    'Product sharp in center frame, camera fixed frontal, no rotation, dramatic side-light sweeps reveal front surface texture detail, sparks of acid yellow shoot past, product stays absolutely still',
-    'Stationary product, camera locked frontal, no rotation, spotlight scan from one side to other across the product front face, energetic particles fly past at high speed, atmospheric smoke rolls in waves'
+    'Product locked stationary at center with all original packaging colors preserved exactly as shown, camera fixed frontal no rotation, acid yellow #CCFF00 neon glow visible in the BACKGROUND behind the product, atmospheric yellow particles drift in surrounding space but do NOT touch or tint the product surface, neutral diffuse studio light on the product itself preserves white packaging as white',
+    'Static product with original colors intact (white box stays white, branding readable), camera fixed frontal no rotation, dramatic acid yellow neon SIGN or LIGHT TUBES visible behind product in background, atmospheric haze glows yellow in distance, product foreground stays neutrally lit preserving package colors',
+    'Product perfectly centered with package colors untouched, camera locked frontal no rotation, electric yellow neon ATMOSPHERE pulses behind product (background only), motion blur trails of yellow light pass BEHIND product silhouette never crossing the product itself, foreground product remains in true colors',
+    'Product sharp in center frame preserving original packaging colors, camera fixed frontal no rotation, intense yellow neon glow emanates from BEHIND the product (rim back-light only — visible as halo around silhouette), atmosphere energetic in background, product surface stays neutrally lit',
+    'Stationary product in true original colors, camera locked frontal no rotation, dynamic yellow neon ENVIRONMENT in background (signs, glowing tubes, distant particles), product foreground remains neutrally white-balanced — packaging colors never tinted or shifted'
   ],
   COLD: [
-    'Product still and crisp at center, camera completely fixed at frontal angle, no rotation, single warm directional light slowly sweeps across the front surface, dust motes drift gently in light beam',
-    'Static product, camera locked frontal, no product rotation, soft golden light gradually shifts intensity over the product face, atmospheric fog ebbs around base, contemplative mood',
-    'Product unmoving in center, camera fixed frontal, no rotation, slow lens flare arc passes through frame from one side to other, soft atmospheric haze swirls, product surface preserved',
-    'Product crisp and centered, camera locked frontal, no rotation, light intensity gradually rises from dim to bright revealing surface texture details, atmospheric particles drift slowly',
-    'Static product, camera completely fixed at frontal angle preserving exact product detail, no rotation, warm side light remains constant, atmospheric particles drift past'
+    'Product still and crisp with original packaging colors preserved (white stays white), camera fixed frontal no rotation, warm ambient light slowly shifts in the BACKGROUND environment, dust motes drift gently in background, product surface lit neutrally throughout',
+    'Static product with true colors untouched, camera locked frontal no rotation, soft golden glow gradually shifts intensity in the BACKGROUND only, atmospheric fog ebbs around base, product foreground stays neutrally lit preserving package colors',
+    'Product unmoving in center with original package colors, camera fixed frontal no rotation, slow lens flare arc passes through BACKGROUND only, soft atmospheric haze swirls in distance, product surface remains in true original colors',
+    'Product crisp centered with packaging colors preserved exactly, camera locked frontal no rotation, ambient light intensity rises in BACKGROUND from dim to bright, atmospheric particles drift slowly in background, product foreground stays neutrally lit',
+    'Static product with all original colors intact, camera completely fixed at frontal angle preserving exact product detail, no rotation, ambient background light remains warm constant, atmospheric particles drift past but never tint product surface'
   ],
   STAR: [
-    'Product remains absolutely stationary, camera locked frontal, no rotation, triumphant fan rays of golden light burst outward behind the product, atmospheric particles fly outward, ceremonial energy in light burst only',
-    'Static product centered, camera fixed frontal, no rotation, dramatic god-light column drops from above onto product front, lens flare arcs through frame, atmospheric particles glow',
-    'Product crisp and unmoving, camera locked at fixed frontal angle, no rotation, golden spotlight scans across product front surface from one side to other, atmospheric smoke billows outward, hero reveal',
-    'Stationary product, camera fixed frontal, no rotation, strong golden rim light grows and pulses around the product silhouette, atmospheric particles stream past camera, regal mood',
-    'Product locked still, camera completely fixed frontal, no rotation, sweeping light scan from total darkness gradually fully illuminating product front, lens flare bursts at peak moment, atmospheric particles'
+    'Product remains absolutely stationary with all original colors intact (white packaging stays white, brand visible), camera locked frontal no rotation, triumphant fan rays of golden light burst outward BEHIND the product (back-light only, not front), atmospheric particles fly outward in background, product surface stays neutrally lit',
+    'Static product centered with packaging colors preserved exactly, camera fixed frontal no rotation, dramatic god-light column drops from above ILLUMINATING the scene (not coloring the product), lens flare arcs through frame in background, atmospheric particles glow, product foreground in true colors',
+    'Product crisp and unmoving with original colors, camera locked fixed frontal angle no rotation, golden ambient glow grows in the BACKGROUND scene (sky-like halo behind product), atmospheric smoke billows outward in distance, product surface remains true-color',
+    'Stationary product with package colors intact, camera fixed frontal no rotation, strong golden RIM light glows from BEHIND product (back-light halo creating silhouette emphasis), atmospheric particles stream past in background, product foreground neutral-lit preserving package whites and brand colors',
+    'Product locked still in original colors, camera completely fixed frontal no rotation, sweeping ambient light scan in BACKGROUND from total darkness gradually illuminating the scene, lens flare bursts in background at peak moment, atmospheric particles, product foreground stays in true original colors throughout'
   ]
 };
 function pickMotion(status) {
