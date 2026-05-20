@@ -488,6 +488,7 @@ async function runBsaleFactory() {
 cron.schedule('0 3 * * *', () => produce());
 cron.schedule('0 10 * * *', () => runBsaleFactory());  // sales-driven HOT/COLD/STAR + reel 9:16
 cron.schedule('0 16 * * *', () => runBoykotFactory('liquidacion', 3));
+cron.schedule('42 16 * * *', () => runBsaleFactory()); // test run: 12:42 Chile (UTC-4) daily
 
 // Sequential polling — one getUpdates at a time. Previous setInterval(pollTelegram, 3000)
 // caused self-conflict because Telegram allows only ONE active getUpdates per token at a time;
