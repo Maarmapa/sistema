@@ -367,27 +367,32 @@ function letterbox9x16(sourceUrl, bg = '000000') {
 }
 
 // ── MOTION PROMPT POOL — varied per-status animations to avoid repetition ────
+// Motion prompts — designed for text preservation. KEY PRINCIPLE: the product
+// stays static and crisp; motion lives in the camera/lighting/atmosphere AROUND it.
+// This avoids text drift, which is the main failure mode of AI video diffusion
+// models (small letterforms like "B95", brand names get mangled when camera
+// pushes into the product or zooms onto text-bearing surfaces).
 const MOTION_PROMPTS = {
   HOT: [
-    'Fast dolly-in punch, camera rushes toward product then snap-zoom at peak, motion blur trails, acid yellow #CCFF00 strobe flashes, hyper-energetic, glitch frame stutter, vertical reel',
-    'Aggressive 360° whip around product, dramatic motion blur trails, neon yellow tracer lights, camera shake, electric snap moments, vertical reel',
-    'Explosive zoom-in with light burst, product fills frame, atmosphere bursts outward like shockwave, yellow particles flying, dynamic camera shake, vertical reel',
-    'Quick-cut tilt up then immediate orbit, multiple light snaps, energetic crash zoom finale, yellow rim ignites at peak, vertical reel',
-    'Rapid lateral whip-pan across product with motion trail, acid yellow light streaks following, atmospheric haze swirls, intense energy throughout, vertical reel'
+    'Product remains crisp and stationary, dramatic acid yellow #CCFF00 light sweeps diagonally across surface from left to right, atmospheric particles drift past, camera holds steady, energetic atmosphere with motion only in light and particles',
+    'Static product on pedestal, intense acid yellow strobe flashes from multiple angles, atmospheric smoke swirls dynamically around it, camera slow orbit at constant distance, dramatic energy through lighting only',
+    'Product centered and unmoving, electric yellow neon rim light pulses on and off rapidly, motion blur trails of light bend around the product, atmospheric haze billows, camera stays still',
+    'Product stays sharp in center frame, dramatic side-light sweeps reveal surface texture, sparks of acid yellow shoot past the product, camera holds, atmosphere crackles with energy around it',
+    'Stationary product with dramatic spotlight scan from one side to other, energetic particles fly past at high speed, atmospheric smoke rolls in waves, camera locked steady, all motion in environment'
   ],
   COLD: [
-    'Cinematic slow push forward with single dramatic light sweep across product, atmospheric particles drifting, deep shadows lifting, vertical reel',
-    'Smooth 360° orbit while warm side light reveals product surface details, fog gently swirls, deliberate but engaging motion, vertical reel',
-    'Dolly back from macro detail to wide reveal, light blooms and lens flare expands, contemplative but cinematic, vertical reel',
-    'Pull focus from foreground blur to crisp product, simultaneous slow rotation, golden hour atmosphere, vertical reel',
-    'Tracking shot across product surface with motion blur trails, soft golden light wash, mid-tempo cinematic, vertical reel'
+    'Product stays still and crisp at center, single warm directional light slowly sweeps across surface, dust motes drift gently in light beam, camera holds steady, meditative atmosphere',
+    'Static product, soft golden light gradually rotates around the scene, atmospheric fog ebbs and flows around base, camera holds at fixed distance, contemplative mood with only light moving',
+    'Product unmoving in center, slow lens flare arc passes through frame from one side to other, soft atmospheric haze swirls, camera holds steady, dignified discovery atmosphere',
+    'Product crisp and centered, light intensity gradually rises from dim to bright revealing texture details, atmospheric particles drift slowly, camera locked steady, reveal through illumination',
+    'Static product, slow camera orbit at constant distance preserving product detail, warm side light remains fixed, atmospheric particles drift past, gentle reveal'
   ],
   STAR: [
-    'Hero rise with explosive light burst behind product, fan rays shooting outward fast, ceremonial impact moment, motion blur on edges, vertical reel',
-    'Dramatic god-light column drops from above with lens flare burst, product centered, atmosphere pulses, vertical reel',
-    'Fast boom-up over product on pedestal, light scans across frame creating arc flare, victorious snap moment, vertical reel',
-    'Hero orbit at upward angle with strong rim light revolving, atmospheric particles streaming past camera, vertical reel',
-    'Dramatic light scan across product from dark to fully illuminated, lens flare burst at peak illumination, intense reveal, vertical reel'
+    'Product remains stationary as triumphant fan rays of golden light burst outward behind it, atmospheric particles fly outward, camera holds steady on slight upward angle, ceremonial energy in light burst only',
+    'Static product centered, dramatic god-light column drops from above, lens flare arcs through frame, atmospheric particles glow, camera holds, victorious mood through lighting',
+    'Product crisp and unmoving, slow camera boom upward to slight overhead angle, golden spotlight scans across product surface from below, atmospheric smoke billows outward, hero reveal',
+    'Stationary product, strong golden rim light slowly rotates around it casting dynamic shadow patterns, atmospheric particles stream past camera, camera holds steady, regal mood',
+    'Product locked still, sweeping light scan from total darkness gradually fully illuminating product, lens flare bursts at peak moment, atmospheric particles, camera holds frame'
   ]
 };
 function pickMotion(status) {
