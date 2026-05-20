@@ -743,43 +743,67 @@ const server = createServer(async (req, res) => {
         const useRatio = ratio || '720:1280';
         const useDuration = duration || 5;
 
-        await sendTelegramPhoto(image_url, preview_caption || `🎨 Source still · model: ${useModel}`);
+        await sendTelegramPhoto(image_url, preview_caption || `🎨 Source · model: ${useModel}`);
 
+        // DIRECT HTTP CALL to Runway API — bypassing SDK because @runwayml/sdk 3.21
+        // may not support newer model names like gen4.5 / veo3.1 properly
         try {
-          const vid = await runway.imageToVideo.create({
-            model: useModel,
-            promptImage: sourceImage,
-            promptText: motion,
-            duration: useDuration,
-            ratio: useRatio,
-          }).waitForTaskOutput();
-          const videoUrl = vid.output?.[0];
-          if (!videoUrl) throw new Error('no video output');
+          console.log(`[runway-direct] starting ${useModel} ratio=${useRatio} duration=${useDuration}`);
+          const startRes = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + RUNWAY_KEY,
+              'X-Runway-Version': '2024-11-06',
+            },
+            body: JSON.stringify({
+              model: useModel,
+              promptImage: sourceImage,
+              promptText: motion,
+              ratio: useRatio,
+              duration: useDuration,
+            }),
+          });
+          const startData = await startRes.json();
+          console.log(`[runway-direct] start response status=${startRes.status} body=${JSON.stringify(startData).slice(0,300)}`);
+
+          if (!startData.id) {
+            const errMsg = startData.error || JSON.stringify(startData).slice(0, 200);
+            await sendTelegram(`❌ Runway ${useModel} rechazó request: ${errMsg}`);
+            return;
+          }
+
+          // Poll task
+          let videoUrl = null;
+          let lastStatus = 'PENDING';
+          for (let i = 0; i < 40; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            const tRes = await fetch(`https://api.dev.runwayml.com/v1/tasks/${startData.id}`, {
+              headers: { 'Authorization': 'Bearer ' + RUNWAY_KEY, 'X-Runway-Version': '2024-11-06' },
+            });
+            const t = await tRes.json();
+            lastStatus = t.status;
+            console.log(`[runway-direct] ${useModel} poll #${i} status=${lastStatus}`);
+            if (lastStatus === 'SUCCEEDED') {
+              videoUrl = t.output?.[0];
+              break;
+            }
+            if (lastStatus === 'FAILED') {
+              await sendTelegram(`❌ Runway ${useModel} FAILED: ${t.failure?.reason || t.error || 'unknown'}`);
+              return;
+            }
+          }
+
+          if (!videoUrl) {
+            await sendTelegram(`❌ Runway ${useModel} timeout (último status: ${lastStatus})`);
+            return;
+          }
           const finalCaption = (caption || '') + (caption ? '\n' : '') + `<i>via Runway ${useModel}</i>`;
           await sendTelegramVideo(videoUrl, finalCaption);
+          console.log(`[runway-direct] ${useModel} delivered: ${videoUrl.slice(0,80)}`);
         } catch (vErr) {
-          // If the chosen model fails (e.g. unsupported ratio, rate limit), try fallback
-          console.error(`[animate-and-push] ${useModel} err:`, vErr.message);
-          if (useModel !== RUNWAY_MODEL_FAST) {
-            await sendTelegram(`⚠️ ${useModel} falló (${vErr.message.slice(0, 80)}), fallback a ${RUNWAY_MODEL_FAST}...`);
-            try {
-              const vid2 = await runway.imageToVideo.create({
-                model: RUNWAY_MODEL_FAST,
-                promptImage: sourceImage,
-                promptText: motion,
-                duration: useDuration,
-                ratio: useRatio,
-              }).waitForTaskOutput();
-              const videoUrl2 = vid2.output?.[0];
-              if (videoUrl2) {
-                await sendTelegramVideo(videoUrl2, (caption || '') + `\n<i>via Runway ${RUNWAY_MODEL_FAST} (fallback)</i>`);
-              }
-            } catch (fErr) {
-              await sendTelegram(`❌ Fallback también falló: ${fErr.message}`);
-            }
-          } else {
-            await sendTelegram(`❌ Runway error: ${vErr.message}`);
-          }
+          console.error(`[runway-direct] ${useModel} exception:`, vErr.message, vErr.stack);
+          await sendTelegram(`❌ Runway exception: ${vErr.message}`);
         }
       } catch (err) {
         console.error('[animate-and-push] err:', err.message);
