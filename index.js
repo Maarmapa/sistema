@@ -311,6 +311,56 @@ async function pollTelegram() {
   }
 }
 
+// ── BOYKOT PRODUCT IMAGE SCRAPER — pulls REAL product image from boykot.cl ────
+// Search → find product page → extract main image URL. Returns null if not found.
+async function findBoykotProductImage(productName) {
+  try {
+    const cleanName = (productName || '').trim();
+    if (!cleanName) return null;
+
+    // Try several search variants in order of specificity
+    const searchVariants = [
+      cleanName,
+      cleanName.replace(/\d+\s*(mm|ml|g|cm|pcs?)/gi, '').trim(), // strip size suffixes
+      cleanName.split(' ').slice(0, 3).join(' '),                // first 3 words
+      cleanName.split(' ')[0],                                    // brand/first word only
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+    for (const query of searchVariants) {
+      const searchUrl = `https://www.boykot.cl/?s=${encodeURIComponent(query)}&post_type=product`;
+      const r = await fetch(searchUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+
+      // Find first product link
+      const productLinkMatch = html.match(/href="(https:\/\/www\.boykot\.cl\/producto\/[^"]+\/?)"/);
+      if (!productLinkMatch) continue;
+
+      // Fetch product page → extract main image
+      const pageRes = await fetch(productLinkMatch[1], {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!pageRes.ok) continue;
+      const pageHtml = await pageRes.text();
+
+      const imgMatch = pageHtml.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/i);
+      if (!imgMatch) continue;
+
+      // Strip WordPress thumbnail size suffix (e.g. "-300x300.jpg" → ".jpg") for full-res
+      const fullResUrl = imgMatch[0].replace(/-\d+x\d+\.(jpg|jpeg|png|webp)/i, '.$1');
+      return { url: fullResUrl, productPageUrl: productLinkMatch[1], matchedQuery: query };
+    }
+    return null;
+  } catch (err) {
+    console.error('[boykot-scrape] err:', err.message);
+    return null;
+  }
+}
+
 // ── BSALE FACTORY — sales-driven content with HOT/COLD/STAR classification ────
 function templateCaption(product, status, opts) {
   const name = (product.name || 'Producto').trim();
@@ -443,24 +493,33 @@ async function runBsaleFactory() {
         };
         await sendTelegram(`${emoji} <b>${(product.name || '').trim()}</b> [${product.brand}]\nstock ${opts.total_stock} · 30d ${opts.units_sold_30d}\nGenerando ${status}...`);
 
-        const [caption, visualPrompt] = await Promise.all([
-          llmCaption(product, status, opts),
-          llmVisualPrompt(product, status),
-        ]);
+        // STEP 1: Find the REAL product image on boykot.cl. No image found = no post (skip slop).
+        const realImage = await findBoykotProductImage(product.name);
+        if (!realImage) {
+          await sendTelegram(`⚠️ ${emoji} <b>${(product.name || '').trim()}</b>\nNo encontrado en boykot.cl, skip (no posteamos slop)`);
+          console.log(`[bsale-factory] ${status} skip: ${product.name} not found on boykot.cl`);
+          continue;
+        }
 
-        const img = await runway.textToImage.create({
-          model: 'gen4_image',
-          promptText: visualPrompt,
-          ratio: '1080:1920',
-        }).waitForTaskOutput();
-        const imgUrl = img.output?.[0];
-        if (!imgUrl) throw new Error('image gen failed');
-        await sendTelegramPhoto(imgUrl, `${emoji} ${(product.name || '').trim()}`);
+        // Show the real photo first so user sees what's being animated
+        await sendTelegramPhoto(realImage.url, `📸 ${emoji} Real: ${(product.name || '').trim()}`);
+
+        // STEP 2: Generate caption (LLM with template fallback)
+        const caption = await llmCaption(product, status, opts);
+
+        // STEP 3: Animate the REAL product image directly via Runway image-to-video.
+        // No textToImage step — Runway can't invent a different product because the input
+        // image IS the product. We just describe camera/lighting movement, not the product.
+        const motionPrompt = status === 'HOT'
+          ? 'Dynamic product reveal, camera dolly forward, dramatic acid yellow rim light sweeping across surface, urgent energy, vertical reel composition, slight rotation'
+          : status === 'COLD'
+          ? 'Meditative slow zoom, single soft light pool, dust particles drifting in light beam, quiet contemplative reveal, vertical reel composition'
+          : 'Triumphant hero shot, slow upward camera rise, golden halo light from above, product centered, vertical reel composition';
 
         const vid = await runway.imageToVideo.create({
           model: 'gen4_turbo',
-          promptImage: imgUrl,
-          promptText: `Slow cinematic reveal, ${(product.name || '').trim()}, dramatic acid yellow rim light, vertical reel composition, ${status === 'HOT' ? 'urgent motion' : status === 'COLD' ? 'meditative still' : 'triumphant hero'}`,
+          promptImage: realImage.url,
+          promptText: motionPrompt,
           duration: 5,
           ratio: '720:1280',
         }).waitForTaskOutput();
