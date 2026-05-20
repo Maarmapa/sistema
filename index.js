@@ -374,25 +374,25 @@ function letterbox9x16(sourceUrl, bg = '000000') {
 // pushes into the product or zooms onto text-bearing surfaces).
 const MOTION_PROMPTS = {
   HOT: [
-    'Product remains crisp and stationary, dramatic acid yellow #CCFF00 light sweeps diagonally across surface from left to right, atmospheric particles drift past, camera holds steady, energetic atmosphere with motion only in light and particles',
-    'Static product on pedestal, intense acid yellow strobe flashes from multiple angles, atmospheric smoke swirls dynamically around it, camera slow orbit at constant distance, dramatic energy through lighting only',
-    'Product centered and unmoving, electric yellow neon rim light pulses on and off rapidly, motion blur trails of light bend around the product, atmospheric haze billows, camera stays still',
-    'Product stays sharp in center frame, dramatic side-light sweeps reveal surface texture, sparks of acid yellow shoot past the product, camera holds, atmosphere crackles with energy around it',
-    'Stationary product with dramatic spotlight scan from one side to other, energetic particles fly past at high speed, atmospheric smoke rolls in waves, camera locked steady, all motion in environment'
+    'Product locked stationary at center, camera completely fixed at frontal angle, no rotation no orbit, dramatic acid yellow #CCFF00 light sweeps diagonally across the front surface from left to right, atmospheric particles drift past, motion ONLY in light and particles',
+    'Static product, camera fixed frontal, no product rotation, intense acid yellow strobe flashes from off-frame sides, atmospheric smoke swirls dynamically around the product, product surface unchanged throughout',
+    'Product perfectly centered and unmoving, camera locked frontal, no rotation, electric yellow neon rim light pulses on and off rapidly, motion blur trails of light bend around the product silhouette, atmosphere alive',
+    'Product sharp in center frame, camera fixed frontal, no rotation, dramatic side-light sweeps reveal front surface texture detail, sparks of acid yellow shoot past, product stays absolutely still',
+    'Stationary product, camera locked frontal, no rotation, spotlight scan from one side to other across the product front face, energetic particles fly past at high speed, atmospheric smoke rolls in waves'
   ],
   COLD: [
-    'Product stays still and crisp at center, single warm directional light slowly sweeps across surface, dust motes drift gently in light beam, camera holds steady, meditative atmosphere',
-    'Static product, soft golden light gradually rotates around the scene, atmospheric fog ebbs and flows around base, camera holds at fixed distance, contemplative mood with only light moving',
-    'Product unmoving in center, slow lens flare arc passes through frame from one side to other, soft atmospheric haze swirls, camera holds steady, dignified discovery atmosphere',
-    'Product crisp and centered, light intensity gradually rises from dim to bright revealing texture details, atmospheric particles drift slowly, camera locked steady, reveal through illumination',
-    'Static product, slow camera orbit at constant distance preserving product detail, warm side light remains fixed, atmospheric particles drift past, gentle reveal'
+    'Product still and crisp at center, camera completely fixed at frontal angle, no rotation, single warm directional light slowly sweeps across the front surface, dust motes drift gently in light beam',
+    'Static product, camera locked frontal, no product rotation, soft golden light gradually shifts intensity over the product face, atmospheric fog ebbs around base, contemplative mood',
+    'Product unmoving in center, camera fixed frontal, no rotation, slow lens flare arc passes through frame from one side to other, soft atmospheric haze swirls, product surface preserved',
+    'Product crisp and centered, camera locked frontal, no rotation, light intensity gradually rises from dim to bright revealing surface texture details, atmospheric particles drift slowly',
+    'Static product, camera completely fixed at frontal angle preserving exact product detail, no rotation, warm side light remains constant, atmospheric particles drift past'
   ],
   STAR: [
-    'Product remains stationary as triumphant fan rays of golden light burst outward behind it, atmospheric particles fly outward, camera holds steady on slight upward angle, ceremonial energy in light burst only',
-    'Static product centered, dramatic god-light column drops from above, lens flare arcs through frame, atmospheric particles glow, camera holds, victorious mood through lighting',
-    'Product crisp and unmoving, slow camera boom upward to slight overhead angle, golden spotlight scans across product surface from below, atmospheric smoke billows outward, hero reveal',
-    'Stationary product, strong golden rim light slowly rotates around it casting dynamic shadow patterns, atmospheric particles stream past camera, camera holds steady, regal mood',
-    'Product locked still, sweeping light scan from total darkness gradually fully illuminating product, lens flare bursts at peak moment, atmospheric particles, camera holds frame'
+    'Product remains absolutely stationary, camera locked frontal, no rotation, triumphant fan rays of golden light burst outward behind the product, atmospheric particles fly outward, ceremonial energy in light burst only',
+    'Static product centered, camera fixed frontal, no rotation, dramatic god-light column drops from above onto product front, lens flare arcs through frame, atmospheric particles glow',
+    'Product crisp and unmoving, camera locked at fixed frontal angle, no rotation, golden spotlight scans across product front surface from one side to other, atmospheric smoke billows outward, hero reveal',
+    'Stationary product, camera fixed frontal, no rotation, strong golden rim light grows and pulses around the product silhouette, atmospheric particles stream past camera, regal mood',
+    'Product locked still, camera completely fixed frontal, no rotation, sweeping light scan from total darkness gradually fully illuminating product front, lens flare bursts at peak moment, atmospheric particles'
   ]
 };
 function pickMotion(status) {
