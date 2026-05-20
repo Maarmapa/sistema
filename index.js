@@ -335,6 +335,43 @@ async function pollTelegram() {
   }
 }
 
+// ── IMAGE PADDING — letterbox to 9:16 so wide products aren't cropped ────
+// Uses wsrv.nl (Cloudflare-backed free image transform service) to wrap any
+// source image inside a 720x1280 black canvas with fit=contain (no crop).
+function letterbox9x16(sourceUrl, bg = '000000') {
+  if (!sourceUrl) return sourceUrl;
+  return `https://wsrv.nl/?url=${encodeURIComponent(sourceUrl)}&w=720&h=1280&fit=contain&cbg=${bg}&we&output=jpg`;
+}
+
+// ── MOTION PROMPT POOL — varied per-status animations to avoid repetition ────
+const MOTION_PROMPTS = {
+  HOT: [
+    'Dynamic dolly-in reveal, camera pushes forward fast then slight pull-back at end, acid yellow #CCFF00 rim light sweeping diagonally across product surface, urgent energy, vertical reel composition',
+    'Quick 180° rotation around product, motion blur trails, intense yellow strobe accents, dramatic depth-of-field shift, vertical reel',
+    'Product fills frame then camera orbits 30° while light sweeps from below, acid yellow highlights pulse, electric energy, vertical reel',
+    'Three-stage push: wide shot, fast tilt up, finish with macro detail on product texture, yellow rim light snaps on at end, vertical reel',
+    'Lateral camera slide across product, motion-blur trail of acid yellow neon following, dramatic atmospheric haze, vertical reel composition'
+  ],
+  COLD: [
+    'Extreme slow zoom-in from above, gentle pendulum sway of light, dust particles drifting through single warm beam, quiet contemplative, vertical reel',
+    'Slow 360° orbit at constant distance, soft global illumination, product seems to float in fog, melancholic stillness, vertical reel',
+    'Camera starts close, pulls back slowly to reveal product alone in vast dark space, single overhead lamp swings gently, vertical reel',
+    'Soft focus pull from blur to clarity, product slowly emerges, warm side light gradually intensifies, meditative pace, vertical reel',
+    'Macro detail tracking shot across product surface, ultra shallow depth, soft golden hour quality, contemplative slow tempo, vertical reel'
+  ],
+  STAR: [
+    'Triumphant rise: camera starts low looking up, golden halo light expands behind product, fan rays burst outward, ceremonial grandeur, vertical reel',
+    'Cinematic god-light from above forming column, product centered in glory beam, slow camera tilt down to product, regal energy, vertical reel',
+    'Slow boom upward over product on pedestal, ceremonial gold-and-yellow spotlight, lens flare arcs across frame, victorious mood, vertical reel',
+    'Hero shot orbit: 90° revolution at slight upward angle, golden rim light revolving with camera, dramatic but elegant, vertical reel',
+    'Product centered, camera holds while light scans across from dark to fully illuminated, lens flare moment at peak, vertical reel'
+  ]
+};
+function pickMotion(status) {
+  const arr = MOTION_PROMPTS[status] || MOTION_PROMPTS.HOT;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 // ── BOYKOT WC STORE API — pulls REAL product image from boykot.cl ────
 // Bsale SKUs don't match boykot.cl SKUs (different systems). Strategy:
 // search by name+brand keywords, score WC results by keyword overlap, require
@@ -596,18 +633,16 @@ async function runBsaleFactory() {
         // STEP 2: Generate caption (LLM with template fallback), now with price + URL context
         const caption = await llmCaption(product, status, opts);
 
-        // STEP 3: Animate the REAL product image directly via Runway image-to-video.
-        // No textToImage step — Runway can't invent a different product because the input
-        // image IS the product. We just describe camera/lighting movement, not the product.
-        const motionPrompt = status === 'HOT'
-          ? 'Dynamic product reveal, camera dolly forward, dramatic acid yellow rim light sweeping across surface, urgent energy, vertical reel composition, slight rotation'
-          : status === 'COLD'
-          ? 'Meditative slow zoom, single soft light pool, dust particles drifting in light beam, quiet contemplative reveal, vertical reel composition'
-          : 'Triumphant hero shot, slow upward camera rise, golden halo light from above, product centered, vertical reel composition';
+        // STEP 3: Animate the REAL product image via Runway image-to-video.
+        // Input is letterboxed to 9:16 BEFORE Runway sees it, so wide products
+        // are never laterally cropped. Motion prompt is randomized from a pool
+        // per status to avoid repetition between successive cron runs.
+        const paddedInput = letterbox9x16(realImage.url);
+        const motionPrompt = pickMotion(status);
 
         const vid = await runway.imageToVideo.create({
           model: 'gen4_turbo',
-          promptImage: realImage.url,
+          promptImage: paddedInput,
           promptText: motionPrompt,
           duration: 5,
           ratio: '720:1280',
@@ -669,6 +704,40 @@ const server = createServer(async (req, res) => {
     res.writeHead(202);
     res.end(JSON.stringify({ message: 'BSALE factory started' }));
     runBsaleFactory();
+  } else if (req.method === 'POST' && req.url === '/push-content') {
+    if (!requireAuth(req, res)) return;
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', async () => {
+      try {
+        const { image_url, video_url, caption, preview_caption } = JSON.parse(body || '{}');
+        if (!image_url && !video_url && !caption) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'Provide at least one of: image_url, video_url, caption' }));
+          return;
+        }
+        const summary = { image: false, video: false, text: false };
+        // If both image and video: image goes first with preview_caption (header), video with main caption (footer)
+        if (image_url) {
+          await sendTelegramPhoto(image_url, preview_caption || (video_url ? '' : caption));
+          summary.image = true;
+        }
+        if (video_url) {
+          await sendTelegramVideo(video_url, caption || '');
+          summary.video = true;
+        }
+        if (!image_url && !video_url && caption) {
+          await sendTelegram(caption);
+          summary.text = true;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ message: 'Pushed to Telegram', summary }));
+      } catch (err) {
+        console.error('[push-content] err:', err.message);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
   } else if (req.method === 'POST' && req.url === '/boykot') {
     if (!requireAuth(req, res)) return;
     let body = '';
