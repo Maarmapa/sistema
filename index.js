@@ -346,25 +346,25 @@ function letterbox9x16(sourceUrl, bg = '000000') {
 // ── MOTION PROMPT POOL — varied per-status animations to avoid repetition ────
 const MOTION_PROMPTS = {
   HOT: [
-    'Dynamic dolly-in reveal, camera pushes forward fast then slight pull-back at end, acid yellow #CCFF00 rim light sweeping diagonally across product surface, urgent energy, vertical reel composition',
-    'Quick 180° rotation around product, motion blur trails, intense yellow strobe accents, dramatic depth-of-field shift, vertical reel',
-    'Product fills frame then camera orbits 30° while light sweeps from below, acid yellow highlights pulse, electric energy, vertical reel',
-    'Three-stage push: wide shot, fast tilt up, finish with macro detail on product texture, yellow rim light snaps on at end, vertical reel',
-    'Lateral camera slide across product, motion-blur trail of acid yellow neon following, dramatic atmospheric haze, vertical reel composition'
+    'Fast dolly-in punch, camera rushes toward product then snap-zoom at peak, motion blur trails, acid yellow #CCFF00 strobe flashes, hyper-energetic, glitch frame stutter, vertical reel',
+    'Aggressive 360° whip around product, dramatic motion blur trails, neon yellow tracer lights, camera shake, electric snap moments, vertical reel',
+    'Explosive zoom-in with light burst, product fills frame, atmosphere bursts outward like shockwave, yellow particles flying, dynamic camera shake, vertical reel',
+    'Quick-cut tilt up then immediate orbit, multiple light snaps, energetic crash zoom finale, yellow rim ignites at peak, vertical reel',
+    'Rapid lateral whip-pan across product with motion trail, acid yellow light streaks following, atmospheric haze swirls, intense energy throughout, vertical reel'
   ],
   COLD: [
-    'Extreme slow zoom-in from above, gentle pendulum sway of light, dust particles drifting through single warm beam, quiet contemplative, vertical reel',
-    'Slow 360° orbit at constant distance, soft global illumination, product seems to float in fog, melancholic stillness, vertical reel',
-    'Camera starts close, pulls back slowly to reveal product alone in vast dark space, single overhead lamp swings gently, vertical reel',
-    'Soft focus pull from blur to clarity, product slowly emerges, warm side light gradually intensifies, meditative pace, vertical reel',
-    'Macro detail tracking shot across product surface, ultra shallow depth, soft golden hour quality, contemplative slow tempo, vertical reel'
+    'Cinematic slow push forward with single dramatic light sweep across product, atmospheric particles drifting, deep shadows lifting, vertical reel',
+    'Smooth 360° orbit while warm side light reveals product surface details, fog gently swirls, deliberate but engaging motion, vertical reel',
+    'Dolly back from macro detail to wide reveal, light blooms and lens flare expands, contemplative but cinematic, vertical reel',
+    'Pull focus from foreground blur to crisp product, simultaneous slow rotation, golden hour atmosphere, vertical reel',
+    'Tracking shot across product surface with motion blur trails, soft golden light wash, mid-tempo cinematic, vertical reel'
   ],
   STAR: [
-    'Triumphant rise: camera starts low looking up, golden halo light expands behind product, fan rays burst outward, ceremonial grandeur, vertical reel',
-    'Cinematic god-light from above forming column, product centered in glory beam, slow camera tilt down to product, regal energy, vertical reel',
-    'Slow boom upward over product on pedestal, ceremonial gold-and-yellow spotlight, lens flare arcs across frame, victorious mood, vertical reel',
-    'Hero shot orbit: 90° revolution at slight upward angle, golden rim light revolving with camera, dramatic but elegant, vertical reel',
-    'Product centered, camera holds while light scans across from dark to fully illuminated, lens flare moment at peak, vertical reel'
+    'Hero rise with explosive light burst behind product, fan rays shooting outward fast, ceremonial impact moment, motion blur on edges, vertical reel',
+    'Dramatic god-light column drops from above with lens flare burst, product centered, atmosphere pulses, vertical reel',
+    'Fast boom-up over product on pedestal, light scans across frame creating arc flare, victorious snap moment, vertical reel',
+    'Hero orbit at upward angle with strong rim light revolving, atmospheric particles streaming past camera, vertical reel',
+    'Dramatic light scan across product from dark to fully illuminated, lens flare burst at peak illumination, intense reveal, vertical reel'
   ]
 };
 function pickMotion(status) {
