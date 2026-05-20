@@ -258,9 +258,33 @@ async function pollTelegram() {
       console.log(`📱 ${msg}`);
 
       if (msg === '/start' || msg === '/help') {
-        await sendTelegram(`🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot\n\n<b>🎬 Mini Docu</b>\n/produce — Film con señales del mundo\n/tema [tema] — Video temático\n/films — Films producidos\n\n<b>🛍️ Boykot Factory</b>\n/url [url] — Video de producto boykot.cl
+        await sendTelegram(
+`🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot
+
+<b>🛍️ Bsale Factory</b> ⭐ NEW
+/bsale — HOT 🔥 / COLD ❄️ / STAR ⭐ con datos reales de venta + imagen real de boykot.cl + reel 9:16
+
+<b>🎬 Mini Docu</b>
+/produce — Film del día (3 escenas)
+/tema [tema] — Video temático custom
+/films — Lista de films producidos
+
+<b>🛍️ Boykot Factory</b>
+/url [url] — Video de producto boykot.cl específico
 /docu-boykot [marca] — Mini film de marca
-/marca [marca] [N] — Photoshoot masivo de marca (Gen-4 Image + Gen-4.5) (angelus/copic/molotow/holbein)\n/boykot-top — Top productos en stock\n/boykot-liquidacion — Últimas unidades\n/boykot-marcas — Por marcas top\n\nPowered by Runway + maarmapa.eth`);
+/marca [marca] [N] — Photoshoot masivo (angelus/copic/molotow/holbein)
+/boykot-top — Top productos en stock (catálogo)
+/boykot-liquidacion — Últimas unidades (catálogo)
+/boykot-marcas — Por marcas top (catálogo)
+/copic-award — Copic Award 2026
+
+<b>⏰ Crons automáticos (hora Chile)</b>
+23:00 — /produce diario (mini docu)
+06:00 — /bsale (HOT/COLD/STAR)
+12:00 — /boykot-liquidacion
+12:42 — /bsale test run extra
+
+<i>Powered by Runway gen4_turbo · Claude Haiku · Bsale · maarmapa.eth</i>`);
       } else if (msg === '/produce') {
         await sendTelegram('🎬 Produciendo...');
         produce();
