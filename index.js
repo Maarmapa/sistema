@@ -372,37 +372,39 @@ function letterbox9x16(sourceUrl, bg = '000000') {
 // This avoids text drift, which is the main failure mode of AI video diffusion
 // models (small letterforms like "B95", brand names get mangled when camera
 // pushes into the product or zooms onto text-bearing surfaces).
-// Motion prompts — TEXT, IDENTITY, and COLOR-FIDELITY preservation.
+// Motion prompts — BLAST = moving specular highlight on product surface.
 // KEY PRINCIPLES (ranked by importance):
-// 1. Product LOCKED STATIONARY — no rotation, no orbit (would reveal unseen sides).
+// 1. Product LOCKED STATIONARY (no rotation, no orbit).
 // 2. Camera fixed at frontal angle.
-// 3. Product TRUE COLORS preserved — packaging colors stay as in source.
-//    Acid yellow accent lives in the BACKGROUND/AMBIENT only — does NOT
-//    tint, paint, or color the product surface itself.
-// 4. Motion lives in: background atmosphere, ambient particles, environmental
-//    light SOURCES visible in scene — never light sweeping across the product
-//    (which makes the model tint the product).
+// 3. THE BLAST: a bright moving specular HIGHLIGHT travels across the
+//    product surface — like a reflection of neon light passing over
+//    glossy packaging. This is the visible motion on the product.
+// 4. Product TRUE COLORS preserved underneath the highlight — the
+//    packaging white/brand colors stay (NOT a tint, NOT a color wash).
+// 5. The yellow accent is in the LIGHT SOURCE in the background, which
+//    creates the moving highlight on the product. Product is not colored
+//    yellow — only the moving reflection is bright.
 const MOTION_PROMPTS = {
   HOT: [
-    'Product locked stationary at center with all original packaging colors preserved exactly as shown, camera fixed frontal no rotation, acid yellow #CCFF00 neon glow visible in the BACKGROUND behind the product, atmospheric yellow particles drift in surrounding space but do NOT touch or tint the product surface, neutral diffuse studio light on the product itself preserves white packaging as white',
-    'Static product with original colors intact (white box stays white, branding readable), camera fixed frontal no rotation, dramatic acid yellow neon SIGN or LIGHT TUBES visible behind product in background, atmospheric haze glows yellow in distance, product foreground stays neutrally lit preserving package colors',
-    'Product perfectly centered with package colors untouched, camera locked frontal no rotation, electric yellow neon ATMOSPHERE pulses behind product (background only), motion blur trails of yellow light pass BEHIND product silhouette never crossing the product itself, foreground product remains in true colors',
-    'Product sharp in center frame preserving original packaging colors, camera fixed frontal no rotation, intense yellow neon glow emanates from BEHIND the product (rim back-light only — visible as halo around silhouette), atmosphere energetic in background, product surface stays neutrally lit',
-    'Stationary product in true original colors, camera locked frontal no rotation, dynamic yellow neon ENVIRONMENT in background (signs, glowing tubes, distant particles), product foreground remains neutrally white-balanced — packaging colors never tinted or shifted'
+    'Product locked stationary at center with packaging colors preserved (white box stays white, branding readable), camera fixed frontal no rotation, a bright moving SPECULAR HIGHLIGHT travels rapidly across the product front surface from left to right (like a reflection of neon light passing over glossy packaging), acid yellow #CCFF00 neon light source visible in the background creating the highlight, atmospheric yellow particles drift, the highlight sweep IS the blast — product colors underneath remain true',
+    'Static product with original colors intact, camera fixed frontal no rotation, bright moving highlight band sweeps diagonally across the product surface (specular reflection moving), acid yellow neon visible in background as light source, atmospheric haze glows yellow in distance, product underneath highlight stays in true white packaging color',
+    'Product centered with package colors untouched, camera locked frontal no rotation, two bright specular highlights pulse and travel across the product front (rapid light reflections like passing under street neon), yellow neon environment in background, foreground product preserves all original colors beneath the moving highlights',
+    'Product sharp in center frame, camera fixed frontal no rotation, dramatic bright HIGHLIGHT SWEEP travels from bottom-left to top-right across the product surface revealing texture details (like a reflection passing over the box), yellow neon source in background, packaging colors preserved underneath',
+    'Stationary product in true original colors, camera locked frontal no rotation, bright moving highlight band races horizontally across the product front (specular reflection blast), yellow neon ATMOSPHERE pulses in background creating the highlight, product underneath stays in original packaging colors'
   ],
   COLD: [
-    'Product still and crisp with original packaging colors preserved (white stays white), camera fixed frontal no rotation, warm ambient light slowly shifts in the BACKGROUND environment, dust motes drift gently in background, product surface lit neutrally throughout',
-    'Static product with true colors untouched, camera locked frontal no rotation, soft golden glow gradually shifts intensity in the BACKGROUND only, atmospheric fog ebbs around base, product foreground stays neutrally lit preserving package colors',
-    'Product unmoving in center with original package colors, camera fixed frontal no rotation, slow lens flare arc passes through BACKGROUND only, soft atmospheric haze swirls in distance, product surface remains in true original colors',
-    'Product crisp centered with packaging colors preserved exactly, camera locked frontal no rotation, ambient light intensity rises in BACKGROUND from dim to bright, atmospheric particles drift slowly in background, product foreground stays neutrally lit',
-    'Static product with all original colors intact, camera completely fixed at frontal angle preserving exact product detail, no rotation, ambient background light remains warm constant, atmospheric particles drift past but never tint product surface'
+    'Product still and crisp with original colors preserved, camera fixed frontal no rotation, a gentle warm highlight slowly travels across the product surface left-to-right (soft specular reflection passing over packaging), warm ambient light source visible in background, dust motes drift gently, product underneath remains in true original colors',
+    'Static product with true colors untouched, camera locked frontal no rotation, soft golden highlight slowly sweeps across the product front surface (specular reflection like sunset light passing over packaging), warm glow in background, product underneath the moving highlight preserves package colors',
+    'Product unmoving in center with original colors, camera fixed frontal no rotation, slow soft highlight band drifts across the product face (a reveal sweep, like passing under a soft lamp), atmospheric haze in background, product colors stay true beneath the moving highlight',
+    'Product crisp centered with packaging colors preserved, camera locked frontal no rotation, gentle bright highlight gradually travels across the product surface revealing texture (soft specular sweep), atmospheric particles drift slowly in background, product underneath stays neutral white-balanced',
+    'Static product with original colors intact, camera fixed frontal no rotation, soft warm highlight slowly washes across the product surface (specular reflection drift), warm ambient source in background, product underneath highlight stays in true packaging colors'
   ],
   STAR: [
-    'Product remains absolutely stationary with all original colors intact (white packaging stays white, brand visible), camera locked frontal no rotation, triumphant fan rays of golden light burst outward BEHIND the product (back-light only, not front), atmospheric particles fly outward in background, product surface stays neutrally lit',
-    'Static product centered with packaging colors preserved exactly, camera fixed frontal no rotation, dramatic god-light column drops from above ILLUMINATING the scene (not coloring the product), lens flare arcs through frame in background, atmospheric particles glow, product foreground in true colors',
-    'Product crisp and unmoving with original colors, camera locked fixed frontal angle no rotation, golden ambient glow grows in the BACKGROUND scene (sky-like halo behind product), atmospheric smoke billows outward in distance, product surface remains true-color',
-    'Stationary product with package colors intact, camera fixed frontal no rotation, strong golden RIM light glows from BEHIND product (back-light halo creating silhouette emphasis), atmospheric particles stream past in background, product foreground neutral-lit preserving package whites and brand colors',
-    'Product locked still in original colors, camera completely fixed frontal no rotation, sweeping ambient light scan in BACKGROUND from total darkness gradually illuminating the scene, lens flare bursts in background at peak moment, atmospheric particles, product foreground stays in true original colors throughout'
+    'Product stationary with original colors intact, camera locked frontal no rotation, triumphant bright specular HIGHLIGHT sweeps across the product surface like a beam of glory passing over the packaging, golden light source in background, atmospheric particles, product underneath the highlight preserves all original colors',
+    'Static product centered with packaging colors preserved, camera fixed frontal no rotation, dramatic golden HIGHLIGHT band travels across product front from one side to other (specular reflection of overhead spotlight passing), lens flare in background, product underneath stays in true colors',
+    'Product crisp and unmoving with original colors, camera locked fixed frontal no rotation, golden bright highlight sweeps slowly across product surface revealing details (like a museum spotlight passing over an artifact), atmospheric smoke billows in distance, product underneath in original packaging colors',
+    'Stationary product with package colors intact, camera fixed frontal no rotation, strong golden moving highlight sweeps across product front and exits frame (specular reflection blast), back-rim light glows in background, atmospheric particles, product underneath remains true to its original colors',
+    'Product locked still in original colors, camera completely fixed frontal no rotation, dramatic bright highlight sweep travels across the product surface from dark to fully illuminated and back (specular reveal blast), lens flare in background at peak, product underneath stays in true original packaging colors throughout'
   ]
 };
 function pickMotion(status) {
