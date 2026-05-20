@@ -704,6 +704,52 @@ const server = createServer(async (req, res) => {
     res.writeHead(202);
     res.end(JSON.stringify({ message: 'BSALE factory started' }));
     runBsaleFactory();
+  } else if (req.method === 'POST' && req.url === '/animate-and-push') {
+    // Takes an Adobe-polished image URL, animates it via Runway gen4_turbo
+    // (9:16 vertical reel), then sends BOTH image + animated video to Telegram.
+    // This is the hybrid pipeline: scheduled-task does Adobe polish, this
+    // endpoint does Runway + delivery using bot's RUNWAYML_API_SECRET.
+    if (!requireAuth(req, res)) return;
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', async () => {
+      try {
+        const { image_url, caption, motion_prompt, preview_caption } = JSON.parse(body || '{}');
+        if (!image_url) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'image_url required' }));
+          return;
+        }
+        // Acknowledge immediately so the calling scheduled task doesn't block
+        res.writeHead(202);
+        res.end(JSON.stringify({ message: 'Animate + push started', image_url }));
+
+        // Pad to 9:16 letterbox so wide products don't get cropped
+        const paddedInput = letterbox9x16(image_url);
+        const motion = motion_prompt || pickMotion('STAR');
+
+        // Send polished still image first as preview
+        await sendTelegramPhoto(image_url, preview_caption || '🎨 Polished still');
+
+        // Animate via Runway gen4_turbo
+        const vid = await runway.imageToVideo.create({
+          model: 'gen4_turbo',
+          promptImage: paddedInput,
+          promptText: motion,
+          duration: 5,
+          ratio: '720:1280',
+        }).waitForTaskOutput();
+        const videoUrl = vid.output?.[0];
+        if (!videoUrl) {
+          await sendTelegram('❌ Runway animation failed');
+          return;
+        }
+        await sendTelegramVideo(videoUrl, caption || '');
+      } catch (err) {
+        console.error('[animate-and-push] err:', err.message);
+        try { await sendTelegram(`❌ Animate-and-push error: ${err.message}`); } catch {}
+      }
+    });
   } else if (req.method === 'POST' && req.url === '/push-content') {
     if (!requireAuth(req, res)) return;
     let body = '';
