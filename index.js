@@ -10,6 +10,10 @@ import * as bsale from './bsale.js';
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
 
 const runway = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET });
+// Runway model: env-overridable. Default gen4.5 (flagship, state-of-the-art motion + temporal coherence).
+// Fallback gen4_turbo if gen4.5 fails or rate-limited. Set RUNWAY_MODEL env to override.
+const RUNWAY_MODEL = process.env.RUNWAY_MODEL || 'gen4.5';
+const RUNWAY_MODEL_FAST = 'gen4_turbo'; // explicit fallback for high-volume / fast-turnaround cases
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1244921942';
 const RUNWAY_KEY = process.env.RUNWAYML_API_SECRET;
@@ -99,7 +103,7 @@ function getProducts(catalog, mode = 'top', limit = 3) {
 async function generateScene(scene) {
   console.log(`🎬 ${scene.title}`);
   const task = await runway.imageToVideo.create({
-    model: 'gen4_turbo',
+    model: RUNWAY_MODEL,
     promptImage: scene.promptImage || 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
     promptText: scene.visual_prompt,
     duration: 5,
@@ -149,7 +153,7 @@ async function runBoykotUrl(productUrl) {
 
     // Gen-4.5 — video (vertical 9:16 reel format)
     const videoTask = await runway.imageToVideo.create({
-      model: 'gen4_turbo',
+      model: RUNWAY_MODEL,
       promptImage: renderUrl,
       promptText: `Slow cinematic product reveal, ${productName}, dramatic lighting sweeps across surface, elegant rotation, black background, yellow light accent`,
       duration: 5,
@@ -284,7 +288,7 @@ async function pollTelegram() {
 12:00 — /boykot-liquidacion
 12:42 — /bsale test run extra
 
-<i>Powered by Runway gen4_turbo · Claude Haiku · Bsale · maarmapa.eth</i>`);
+<i>Powered by Runway Gen-4.5 · Claude Haiku · Bsale · maarmapa.eth</i>`);
       } else if (msg === '/produce') {
         await sendTelegram('🎬 Produciendo...');
         produce();
@@ -641,7 +645,7 @@ async function runBsaleFactory() {
         const motionPrompt = pickMotion(status);
 
         const vid = await runway.imageToVideo.create({
-          model: 'gen4_turbo',
+          model: RUNWAY_MODEL,
           promptImage: paddedInput,
           promptText: motionPrompt,
           duration: 5,
@@ -733,7 +737,7 @@ const server = createServer(async (req, res) => {
 
         // Animate via Runway gen4_turbo
         const vid = await runway.imageToVideo.create({
-          model: 'gen4_turbo',
+          model: RUNWAY_MODEL,
           promptImage: paddedInput,
           promptText: motion,
           duration: 5,
@@ -916,7 +920,7 @@ async function runDocuBoykot(brand = 'default') {
         const renderUrl = imageTask.output[0];
 
         const videoTask = await runway.imageToVideo.create({
-          model: 'gen4_turbo',
+          model: RUNWAY_MODEL,
           promptImage: renderUrl,
           promptText: scene.motion + ', cinematic, slow motion, dramatic',
           duration: 5,
@@ -927,7 +931,7 @@ async function runDocuBoykot(brand = 'default') {
       } else {
         // Fallback — text only
         const task = await runway.imageToVideo.create({
-          model: 'gen4_turbo',
+          model: RUNWAY_MODEL,
           promptImage: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
           promptText: scene.motion + ', cinematic, dramatic lighting, black background',
           duration: 5,
@@ -1030,7 +1034,7 @@ async function runMarcaFactory(marca, limit = 5) {
 
       // Gen-4.5 — cinematic video
       const videoCreate = await runway.imageToVideo.create({
-        model: 'gen4_turbo',
+        model: RUNWAY_MODEL,
         promptImage: renderUrl,
         promptText: `Slow cinematic product presentation, ${variantDesc}, elegant 360 rotation, dramatic studio lighting sweeps across product surface, black background, acid yellow light accent, commercial quality`,
         duration: 5,
@@ -1105,7 +1109,7 @@ async function runCopicAward() {
 
       // Gen-4.5 — video
       const videoTask = await runway.imageToVideo.create({
-        model: 'gen4_turbo',
+        model: RUNWAY_MODEL,
         promptImage: renderUrl,
         promptText: scene.motion,
         duration: 5,
