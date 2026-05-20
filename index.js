@@ -641,12 +641,14 @@ async function runBsaleFactory() {
         // Input is letterboxed to 9:16 BEFORE Runway sees it, so wide products
         // are never laterally cropped. Motion prompt is randomized from a pool
         // per status to avoid repetition between successive cron runs.
-        const paddedInput = letterbox9x16(realImage.url);
+        // Pass raw image to Runway — letterbox padding was killing motion
+        // (filled frame with static black borders, model had nothing to animate)
+        const sourceImage = realImage.url;
         const motionPrompt = pickMotion(status);
 
         const vid = await runway.imageToVideo.create({
           model: RUNWAY_MODEL,
-          promptImage: paddedInput,
+          promptImage: sourceImage,
           promptText: motionPrompt,
           duration: 5,
           ratio: '720:1280',
@@ -734,7 +736,8 @@ const server = createServer(async (req, res) => {
         res.writeHead(202);
         res.end(JSON.stringify({ message: 'Animate + push started', image_url, model: model || RUNWAY_MODEL }));
 
-        const paddedInput = letterbox9x16(image_url);
+        // Pass raw image — letterbox padding was killing motion in v3 demos
+        const sourceImage = image_url;
         const motion = motion_prompt || pickMotion('STAR');
         const useModel = model || RUNWAY_MODEL;
         const useRatio = ratio || '720:1280';
@@ -745,7 +748,7 @@ const server = createServer(async (req, res) => {
         try {
           const vid = await runway.imageToVideo.create({
             model: useModel,
-            promptImage: paddedInput,
+            promptImage: sourceImage,
             promptText: motion,
             duration: useDuration,
             ratio: useRatio,
@@ -762,7 +765,7 @@ const server = createServer(async (req, res) => {
             try {
               const vid2 = await runway.imageToVideo.create({
                 model: RUNWAY_MODEL_FAST,
-                promptImage: paddedInput,
+                promptImage: sourceImage,
                 promptText: motion,
                 duration: useDuration,
                 ratio: useRatio,
