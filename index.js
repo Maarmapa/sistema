@@ -709,46 +709,75 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify({ message: 'BSALE factory started' }));
     runBsaleFactory();
   } else if (req.method === 'POST' && req.url === '/animate-and-push') {
-    // Takes an Adobe-polished image URL, animates it via Runway gen4_turbo
-    // (9:16 vertical reel), then sends BOTH image + animated video to Telegram.
-    // This is the hybrid pipeline: scheduled-task does Adobe polish, this
-    // endpoint does Runway + delivery using bot's RUNWAYML_API_SECRET.
+    // Takes an image URL, animates it via Runway (model selectable: gen4.5,
+    // gen4_turbo, veo3.1, veo3.1_fast, gen4_aleph, etc.), then sends BOTH
+    // image + animated video to Telegram.
     if (!requireAuth(req, res)) return;
     let body = '';
     req.on('data', d => body += d);
     req.on('end', async () => {
       try {
-        const { image_url, caption, motion_prompt, preview_caption } = JSON.parse(body || '{}');
+        const {
+          image_url,
+          caption,
+          motion_prompt,
+          preview_caption,
+          model,        // override default model (e.g. 'veo3.1', 'gen4.5', 'gen4_turbo')
+          duration,     // seconds, default 5
+          ratio,        // default '720:1280'
+        } = JSON.parse(body || '{}');
         if (!image_url) {
           res.writeHead(400);
           res.end(JSON.stringify({ error: 'image_url required' }));
           return;
         }
-        // Acknowledge immediately so the calling scheduled task doesn't block
         res.writeHead(202);
-        res.end(JSON.stringify({ message: 'Animate + push started', image_url }));
+        res.end(JSON.stringify({ message: 'Animate + push started', image_url, model: model || RUNWAY_MODEL }));
 
-        // Pad to 9:16 letterbox so wide products don't get cropped
         const paddedInput = letterbox9x16(image_url);
         const motion = motion_prompt || pickMotion('STAR');
+        const useModel = model || RUNWAY_MODEL;
+        const useRatio = ratio || '720:1280';
+        const useDuration = duration || 5;
 
-        // Send polished still image first as preview
-        await sendTelegramPhoto(image_url, preview_caption || '🎨 Polished still');
+        await sendTelegramPhoto(image_url, preview_caption || `🎨 Source still · model: ${useModel}`);
 
-        // Animate via Runway gen4_turbo
-        const vid = await runway.imageToVideo.create({
-          model: RUNWAY_MODEL,
-          promptImage: paddedInput,
-          promptText: motion,
-          duration: 5,
-          ratio: '720:1280',
-        }).waitForTaskOutput();
-        const videoUrl = vid.output?.[0];
-        if (!videoUrl) {
-          await sendTelegram('❌ Runway animation failed');
-          return;
+        try {
+          const vid = await runway.imageToVideo.create({
+            model: useModel,
+            promptImage: paddedInput,
+            promptText: motion,
+            duration: useDuration,
+            ratio: useRatio,
+          }).waitForTaskOutput();
+          const videoUrl = vid.output?.[0];
+          if (!videoUrl) throw new Error('no video output');
+          const finalCaption = (caption || '') + (caption ? '\n' : '') + `<i>via Runway ${useModel}</i>`;
+          await sendTelegramVideo(videoUrl, finalCaption);
+        } catch (vErr) {
+          // If the chosen model fails (e.g. unsupported ratio, rate limit), try fallback
+          console.error(`[animate-and-push] ${useModel} err:`, vErr.message);
+          if (useModel !== RUNWAY_MODEL_FAST) {
+            await sendTelegram(`⚠️ ${useModel} falló (${vErr.message.slice(0, 80)}), fallback a ${RUNWAY_MODEL_FAST}...`);
+            try {
+              const vid2 = await runway.imageToVideo.create({
+                model: RUNWAY_MODEL_FAST,
+                promptImage: paddedInput,
+                promptText: motion,
+                duration: useDuration,
+                ratio: useRatio,
+              }).waitForTaskOutput();
+              const videoUrl2 = vid2.output?.[0];
+              if (videoUrl2) {
+                await sendTelegramVideo(videoUrl2, (caption || '') + `\n<i>via Runway ${RUNWAY_MODEL_FAST} (fallback)</i>`);
+              }
+            } catch (fErr) {
+              await sendTelegram(`❌ Fallback también falló: ${fErr.message}`);
+            }
+          } else {
+            await sendTelegram(`❌ Runway error: ${vErr.message}`);
+          }
         }
-        await sendTelegramVideo(videoUrl, caption || '');
       } catch (err) {
         console.error('[animate-and-push] err:', err.message);
         try { await sendTelegram(`❌ Animate-and-push error: ${err.message}`); } catch {}
