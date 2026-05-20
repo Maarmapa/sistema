@@ -14,6 +14,25 @@ const runway = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET });
 // Fallback gen4_turbo if gen4.5 fails or rate-limited. Set RUNWAY_MODEL env to override.
 const RUNWAY_MODEL = process.env.RUNWAY_MODEL || 'gen4.5';
 const RUNWAY_MODEL_FAST = 'gen4_turbo'; // explicit fallback for high-volume / fast-turnaround cases
+
+// Per-model duration constraints. New models (gen4.5, veo3.1, veo3, etc.) only
+// accept 4/6/8 seconds; older models like gen4_turbo accept 5/10. This helper
+// snaps a requested duration to the nearest allowed value for the given model.
+function durationForModel(model, requested) {
+  const allowed = {
+    'gen4.5': [4, 6, 8],
+    'veo3.1': [4, 6, 8],
+    'veo3.1_fast': [4, 6, 8],
+    'veo3': [4, 6, 8],
+    'gen4_turbo': [5, 10],
+    'gen3a_turbo': [5, 10],
+  };
+  const arr = allowed[model];
+  if (!arr) return requested;
+  return arr.reduce((closest, val) =>
+    Math.abs(val - requested) < Math.abs(closest - requested) ? val : closest
+  );
+}
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '1244921942';
 const RUNWAY_KEY = process.env.RUNWAYML_API_SECRET;
@@ -106,7 +125,7 @@ async function generateScene(scene) {
     model: RUNWAY_MODEL,
     promptImage: scene.promptImage || 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
     promptText: scene.visual_prompt,
-    duration: 5,
+    duration: durationForModel(RUNWAY_MODEL, 5),
     ratio: '720:1280', // reel 9:16
   });
   let result = task;
@@ -156,7 +175,7 @@ async function runBoykotUrl(productUrl) {
       model: RUNWAY_MODEL,
       promptImage: renderUrl,
       promptText: `Slow cinematic product reveal, ${productName}, dramatic lighting sweeps across surface, elegant rotation, black background, yellow light accent`,
-      duration: 5,
+      duration: durationForModel(RUNWAY_MODEL, 5),
       ratio: '720:1280',
     }).waitForTaskOutput();
 
@@ -650,7 +669,7 @@ async function runBsaleFactory() {
           model: RUNWAY_MODEL,
           promptImage: sourceImage,
           promptText: motionPrompt,
-          duration: 5,
+          duration: durationForModel(RUNWAY_MODEL, 5),
           ratio: '720:1280',
         }).waitForTaskOutput();
         const videoUrl = vid.output?.[0];
@@ -761,7 +780,7 @@ const server = createServer(async (req, res) => {
               promptImage: sourceImage,
               promptText: motion,
               ratio: useRatio,
-              duration: useDuration,
+              duration: durationForModel(useModel, useDuration),
             }),
           });
           const startData = await startRes.json();
@@ -979,7 +998,7 @@ async function runDocuBoykot(brand = 'default') {
           model: RUNWAY_MODEL,
           promptImage: renderUrl,
           promptText: scene.motion + ', cinematic, slow motion, dramatic',
-          duration: 5,
+          duration: durationForModel(RUNWAY_MODEL, 5),
           ratio: '1280:720',
         }).waitForTaskOutput();
 
@@ -990,7 +1009,7 @@ async function runDocuBoykot(brand = 'default') {
           model: RUNWAY_MODEL,
           promptImage: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
           promptText: scene.motion + ', cinematic, dramatic lighting, black background',
-          duration: 5,
+          duration: durationForModel(RUNWAY_MODEL, 5),
           ratio: '1280:720',
         }).waitForTaskOutput();
         videoUrl = task.output[0];
@@ -1093,7 +1112,7 @@ async function runMarcaFactory(marca, limit = 5) {
         model: RUNWAY_MODEL,
         promptImage: renderUrl,
         promptText: `Slow cinematic product presentation, ${variantDesc}, elegant 360 rotation, dramatic studio lighting sweeps across product surface, black background, acid yellow light accent, commercial quality`,
-        duration: 5,
+        duration: durationForModel(RUNWAY_MODEL, 5),
         ratio: '1280:720',
       });
       let videoTask = videoCreate;
@@ -1168,7 +1187,7 @@ async function runCopicAward() {
         model: RUNWAY_MODEL,
         promptImage: renderUrl,
         promptText: scene.motion,
-        duration: 5,
+        duration: durationForModel(RUNWAY_MODEL, 5),
         ratio: '1280:720',
       }).waitForTaskOutput();
 
