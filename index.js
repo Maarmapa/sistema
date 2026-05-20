@@ -1,9 +1,13 @@
 import RunwayML from '@runwayml/sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import cron from 'node-cron';
 import fetch from 'node-fetch';
 import { createServer } from 'http';
 import fs from 'fs';
 import path from 'path';
+import * as bsale from './bsale.js';
+
+const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
 
 const runway = new RunwayML({ apiKey: process.env.RUNWAYML_API_SECRET });
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -96,10 +100,10 @@ async function generateScene(scene) {
   console.log(`🎬 ${scene.title}`);
   const task = await runway.imageToVideo.create({
     model: 'gen4_turbo',
-    promptImage: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
+    promptImage: scene.promptImage || 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1280&q=80',
     promptText: scene.visual_prompt,
     duration: 5,
-    ratio: '1280:720',
+    ratio: '720:1280', // reel 9:16
   });
   let result = task;
   while (result.status !== 'SUCCEEDED' && result.status !== 'FAILED') {
@@ -131,25 +135,25 @@ async function runBoykotUrl(productUrl) {
     await sendTelegram(`📦 <b>${productName}</b>\n${price}\n🎨 Generando render editorial...`);
     await sendTelegramPhoto(imgUrl, `📸 Original: ${productName}`);
 
-    // Gen-4 Image — render editorial
+    // Gen-4 Image — render editorial (vertical 9:16 reel format)
     const imageTask = await runway.textToImage.create({
       model: 'gen4_image',
       promptText: `Professional editorial product render, black background #000000, acid yellow #CCFF00 dramatic rim lighting, ultra minimal studio, high contrast, same product exact shape and colors, photorealistic, no people, no text`,
       referenceImages: [{ uri: imgUrl, weight: 0.85 }],
-      ratio: '1920:1080',
+      ratio: '1080:1920',
     }).waitForTaskOutput();
 
     const renderUrl = imageTask.output[0];
     await sendTelegramPhoto(renderUrl, `🎨 Render: ${productName}`);
     await sendTelegram(`🎬 Animando con Gen-4.5...`);
 
-    // Gen-4.5 — video
+    // Gen-4.5 — video (vertical 9:16 reel format)
     const videoTask = await runway.imageToVideo.create({
       model: 'gen4_turbo',
       promptImage: renderUrl,
       promptText: `Slow cinematic product reveal, ${productName}, dramatic lighting sweeps across surface, elegant rotation, black background, yellow light accent`,
       duration: 5,
-      ratio: '1280:720',
+      ratio: '720:1280',
     }).waitForTaskOutput();
 
     const caption = `🎬 <b>${productName}</b>\n${price ? '💰 ' + price + '\n' : ''}\nboykot.cl 🎨\n#boykot #artesupplies #chile`;
@@ -285,6 +289,9 @@ async function pollTelegram() {
       } else if (msg === '/copic-award') {
         await sendTelegram('🏆 Generando Copic Award 2026...');
         runCopicAward();
+      } else if (msg === '/bsale') {
+        await sendTelegram('🛍️ BSALE factory manual run...');
+        runBsaleFactory();
       } else if (msg === '/boykot-top') {
         await sendTelegram('🛍️ Generando top productos Boykot...');
         runBoykotFactory('top', 3);
@@ -304,9 +311,182 @@ async function pollTelegram() {
   }
 }
 
+// ── BSALE FACTORY — sales-driven content with HOT/COLD/STAR classification ────
+function templateCaption(product, status, opts) {
+  const name = (product.name || 'Producto').trim();
+  const brand = opts.brand || 'Boykot';
+  const tag = brand.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (status === 'HOT') {
+    return `🔥 <b>${name}</b>\nVuelan los ${brand}. ${opts.units_sold_30d} unidades movidas en los últimos 30 días.\nQuedan ${opts.total_stock} en stock — al ritmo que van, no duran.\n\nboykot.cl\n#boykot #${tag} #arte #chile`;
+  }
+  if (status === 'COLD') {
+    return `❄️ <b>${name}</b>\nLo redescubrimos. ${brand} acumulando polvo en el rincón, sin movimiento hace semanas.\n${opts.total_stock} unidades esperando que alguien las pruebe.\n\nboykot.cl\n#boykot #${tag} #arte #chile`;
+  }
+  return `⭐ <b>${name}</b>\nLos pintores saben. ${brand} en el top vendidos del mes — ${opts.units_sold_30d} unidades.\n\nboykot.cl\n#boykot #${tag} #arte #chile`;
+}
+
+async function llmCaption(product, status, opts) {
+  const fallback = templateCaption(product, status, opts);
+  if (!anthropic) return fallback;
+  try {
+    const tone = status === 'HOT' ? 'urgente, sentido de FOMO, vuela el stock'
+               : status === 'COLD' ? 'poético, joya redescubierta, invita a probar'
+               : 'triunfal, los favoritos del mes, social proof';
+    const res = await anthropic.messages.create({
+      model: 'claude-3-5-haiku-20241022',
+      max_tokens: 280,
+      messages: [{
+        role: 'user',
+        content: `Escribí UN caption para Instagram Reel de Boykot.cl (tienda de arte chilena online), tono ${tone}, 50-80 palabras, en español rioplatense/chileno neutro.
+
+Producto: ${(product.name || '').trim()}
+Marca: ${opts.brand}
+Status: ${status}
+Vendidos últimos 30 días: ${opts.units_sold_30d}
+Stock actual: ${opts.total_stock} unidades
+
+Reglas:
+- HTML válido para Telegram: sólo <b>negrita</b> y emojis están permitidos. NO <em>, <i>, <p>, ni otros tags.
+- Sin URLs en el cuerpo (cerrar con "boykot.cl" suelto)
+- Sin frases tipo "compralo ya", "no te lo pierdas" — sin hard sell
+- Que suene hecho a mano por un artista, no genérico de marketing
+- 3-5 hashtags al final
+- Sólo devolvé el caption, sin explicación previa.`,
+      }],
+    });
+    const text = res.content?.[0]?.text?.trim();
+    return text || fallback;
+  } catch (err) {
+    console.error('[llm] caption err:', err.message);
+    return fallback;
+  }
+}
+
+async function llmVisualPrompt(product, status) {
+  const fallback = `Editorial product photography, ${(product.name || '').trim()}, vertical 9:16 composition, black background #000000, dramatic acid yellow #CCFF00 rim lighting, ultra minimal studio, hyper-detailed macro, cinematic dark aesthetic, photorealistic, no people, no text overlay`;
+  if (!anthropic) return fallback;
+  try {
+    const energy = status === 'HOT' ? 'dramatic urgent energy, motion blur edges, intense rim light' :
+                   status === 'COLD' ? 'meditative still, soft single light pool, dust particles in light beam' :
+                   'triumphant golden hero shot, centered, halo light';
+    const res = await anthropic.messages.create({
+      model: 'claude-3-5-haiku-20241022',
+      max_tokens: 150,
+      messages: [{
+        role: 'user',
+        content: `Generate ONLY a Runway gen4_image text-to-image prompt (no explanation, no quotes, no preamble) for a vertical 9:16 editorial product shot.
+
+Product: ${(product.name || '').trim()}
+Brand: ${product.brand}
+Mood: ${energy}
+
+Mandatory aesthetic constraints: black background, acid yellow #CCFF00 accent light, vertical reel composition, photorealistic, no people, no text overlays, dramatic cinematic. 1-2 sentences, dense, evocative.`,
+      }],
+    });
+    const text = res.content?.[0]?.text?.trim();
+    return text || fallback;
+  } catch (err) {
+    console.error('[llm] visual err:', err.message);
+    return fallback;
+  }
+}
+
+async function runBsaleFactory() {
+  const startTs = Date.now();
+  try {
+    console.log('🛍️ BSALE FACTORY iniciando');
+    await sendTelegram('🛍️ <b>BSALE Factory</b>\nLeyendo ventas + stock de Bsale...');
+
+    const catalog = bsale.loadCatalog();
+    if (!catalog.length) {
+      await sendTelegram('❌ catalog.json vacío o no encontrado');
+      return;
+    }
+
+    let salesMap;
+    let mode = 'sales';
+    try {
+      salesMap = await bsale.getSalesByVariant(30);
+      if (salesMap.size === 0) throw new Error('no sales returned');
+    } catch (err) {
+      console.error('[bsale] sales unavailable:', err.message, '— falling back to stock heuristic');
+      mode = 'stock-heuristic';
+      salesMap = new Map();
+    }
+
+    const classified = mode === 'sales'
+      ? bsale.classifyProducts(catalog, salesMap)
+      : bsale.classifyByStockHeuristic(catalog);
+
+    const history = bsale.loadHistory();
+    const picks = bsale.selectDailyPicks(classified, history);
+
+    await sendTelegram(`📊 <b>Clasificación</b> (${mode})\n🔥 HOT: ${classified.hot.length}\n❄️ COLD: ${classified.cold.length}\n⭐ STAR: ${classified.star.length}`);
+
+    const queue = [
+      { status: 'HOT',  emoji: '🔥', product: picks.hot },
+      { status: 'COLD', emoji: '❄️', product: picks.cold },
+      { status: 'STAR', emoji: '⭐', product: picks.star },
+    ];
+
+    let posted = 0;
+    for (const { status, emoji, product } of queue) {
+      if (!product) {
+        console.log(`[bsale-factory] no candidate for ${status} — skip`);
+        continue;
+      }
+      try {
+        const opts = {
+          brand: product.brand,
+          units_sold_30d: product.totalSold,
+          total_stock: product.totalStock,
+        };
+        await sendTelegram(`${emoji} <b>${(product.name || '').trim()}</b> [${product.brand}]\nstock ${opts.total_stock} · 30d ${opts.units_sold_30d}\nGenerando ${status}...`);
+
+        const [caption, visualPrompt] = await Promise.all([
+          llmCaption(product, status, opts),
+          llmVisualPrompt(product, status),
+        ]);
+
+        const img = await runway.textToImage.create({
+          model: 'gen4_image',
+          promptText: visualPrompt,
+          ratio: '1080:1920',
+        }).waitForTaskOutput();
+        const imgUrl = img.output?.[0];
+        if (!imgUrl) throw new Error('image gen failed');
+        await sendTelegramPhoto(imgUrl, `${emoji} ${(product.name || '').trim()}`);
+
+        const vid = await runway.imageToVideo.create({
+          model: 'gen4_turbo',
+          promptImage: imgUrl,
+          promptText: `Slow cinematic reveal, ${(product.name || '').trim()}, dramatic acid yellow rim light, vertical reel composition, ${status === 'HOT' ? 'urgent motion' : status === 'COLD' ? 'meditative still' : 'triumphant hero'}`,
+          duration: 5,
+          ratio: '720:1280',
+        }).waitForTaskOutput();
+        const videoUrl = vid.output?.[0];
+        if (!videoUrl) throw new Error('video gen failed');
+        await sendTelegramVideo(videoUrl, caption);
+
+        bsale.recordPost(history, product, status);
+        posted++;
+      } catch (err) {
+        console.error(`[bsale-factory] ${status} err:`, err.message);
+        await sendTelegram(`❌ Error en ${status}: ${err.message}`);
+      }
+    }
+
+    const elapsed = Math.round((Date.now() - startTs) / 1000);
+    await sendTelegram(`✅ <b>BSALE Factory</b>\n${posted}/3 posts publicados · ${elapsed}s · modo: ${mode}`);
+  } catch (err) {
+    console.error('[bsale-factory] global err:', err.message);
+    await sendTelegram(`❌ BSALE Factory error: ${err.message}`);
+  }
+}
+
 // ── SCHEDULER ─────────────────────────────────────────────────
 cron.schedule('0 3 * * *', () => produce());
-cron.schedule('0 10 * * *', () => runBoykotFactory('top', 3));
+cron.schedule('0 10 * * *', () => runBsaleFactory());  // sales-driven HOT/COLD/STAR + reel 9:16
 cron.schedule('0 16 * * *', () => runBoykotFactory('liquidacion', 3));
 
 // Sequential polling — one getUpdates at a time. Previous setInterval(pollTelegram, 3000)
@@ -335,6 +515,11 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify({ message: 'Production started', theme: theme || null }));
       produce(theme);
     });
+  } else if (req.method === 'POST' && req.url === '/bsale') {
+    if (!requireAuth(req, res)) return;
+    res.writeHead(202);
+    res.end(JSON.stringify({ message: 'BSALE factory started' }));
+    runBsaleFactory();
   } else if (req.method === 'POST' && req.url === '/boykot') {
     if (!requireAuth(req, res)) return;
     let body = '';
