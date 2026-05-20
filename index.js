@@ -335,52 +335,95 @@ async function pollTelegram() {
   }
 }
 
-// ── BOYKOT PRODUCT IMAGE SCRAPER — pulls REAL product image from boykot.cl ────
-// Search → find product page → extract main image URL. Returns null if not found.
-async function findBoykotProductImage(productName) {
+// ── BOYKOT WC STORE API — pulls REAL product image from boykot.cl ────
+// Bsale SKUs don't match boykot.cl SKUs (different systems). Strategy:
+// search by name+brand keywords, score WC results by keyword overlap, require
+// minimum match strength to avoid posting wrong product. Returns null if no
+// confident match (skip = no slop posted).
+function decodeHtml(s) {
+  return (s || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&#?\d+;/g, '');
+}
+
+async function findBoykotProductImage(product) {
   try {
-    const cleanName = (productName || '').trim();
-    if (!cleanName) return null;
+    const name = (product.name || '').trim();
+    const brand = product.brand || '';
+    const firstVariantDesc = (product.variants?.[0]?.description || '').trim();
 
-    // Try several search variants in order of specificity
-    const searchVariants = [
-      cleanName,
-      cleanName.replace(/\d+\s*(mm|ml|g|cm|pcs?)/gi, '').trim(), // strip size suffixes
-      cleanName.split(' ').slice(0, 3).join(' '),                // first 3 words
-      cleanName.split(' ')[0],                                    // brand/first word only
-    ].filter((v, i, a) => v && a.indexOf(v) === i);
+    if (!name && !brand) return null;
 
-    for (const query of searchVariants) {
-      const searchUrl = `https://www.boykot.cl/?s=${encodeURIComponent(query)}&post_type=product`;
-      const r = await fetch(searchUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!r.ok) continue;
-      const html = await r.text();
+    // Build a set of expected keywords from our catalog product
+    const keywordPool = (name + ' ' + brand + ' ' + firstVariantDesc).toLowerCase();
+    const productKeywords = new Set(
+      keywordPool.split(/[\s,()/.:\-]+/).filter(w => w.length >= 3)
+    );
 
-      // Find first product link
-      const productLinkMatch = html.match(/href="(https:\/\/www\.boykot\.cl\/producto\/[^"]+\/?)"/);
-      if (!productLinkMatch) continue;
+    // Build search queries — try in order from most specific to most general
+    const queries = [];
+    if (brand && name) queries.push(`${brand} ${name.split(/\s+/).slice(0, 3).join(' ')}`);
+    if (name) queries.push(name);
+    if (brand && firstVariantDesc) queries.push(`${brand} ${firstVariantDesc.split(/\s+/)[0]}`);
+    if (brand) queries.push(brand);
 
-      // Fetch product page → extract main image
-      const pageRes = await fetch(productLinkMatch[1], {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!pageRes.ok) continue;
-      const pageHtml = await pageRes.text();
+    const seen = new Set();
+    let bestMatch = null;
+    let bestScore = 0;
 
-      const imgMatch = pageHtml.match(/https:\/\/www\.boykot\.cl\/wp-content\/uploads\/[^\s"']+\.(jpg|jpeg|png|webp)/i);
-      if (!imgMatch) continue;
+    for (const q of queries) {
+      const qn = q.toLowerCase().trim();
+      if (!qn || seen.has(qn)) continue;
+      seen.add(qn);
 
-      // Strip WordPress thumbnail size suffix (e.g. "-300x300.jpg" → ".jpg") for full-res
-      const fullResUrl = imgMatch[0].replace(/-\d+x\d+\.(jpg|jpeg|png|webp)/i, '.$1');
-      return { url: fullResUrl, productPageUrl: productLinkMatch[1], matchedQuery: query };
+      try {
+        const r = await fetch(
+          `https://www.boykot.cl/wp-json/wc/store/products?search=${encodeURIComponent(q)}&per_page=20`,
+          { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) }
+        );
+        if (!r.ok) continue;
+        const arr = await r.json();
+        if (!Array.isArray(arr) || arr.length === 0) continue;
+
+        // Score each WC result by # of overlapping keywords with our product
+        for (const wc of arr) {
+          if (!wc.images?.[0]?.src) continue;
+          const wcText = decodeHtml(wc.name || '').toLowerCase();
+          const wcWords = new Set(wcText.split(/[\s,()/.:\-]+/).filter(w => w.length >= 3));
+          let score = 0;
+          for (const w of wcWords) if (productKeywords.has(w)) score++;
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = { wc, query: q };
+          }
+        }
+
+        // If we found a strong match (≥3 keywords) on this query, stop early
+        if (bestScore >= 3) break;
+      } catch (err) {
+        console.error('[boykot-api] query "' + q + '" err:', err.message);
+      }
     }
-    return null;
+
+    // Require at least 2 keyword matches to consider it the right product
+    if (!bestMatch || bestScore < 2) {
+      console.log(`[boykot-api] no confident match for "${name}" (brand=${brand}, bestScore=${bestScore})`);
+      return null;
+    }
+
+    const wc = bestMatch.wc;
+    return {
+      url: wc.images[0].src,
+      productPageUrl: wc.permalink,
+      wcName: decodeHtml(wc.name),
+      wcSku: wc.sku,
+      matchedQuery: bestMatch.query,
+      matchScore: bestScore,
+    };
   } catch (err) {
-    console.error('[boykot-scrape] err:', err.message);
+    console.error('[boykot-api] global err:', err.message);
     return null;
   }
 }
@@ -517,16 +560,17 @@ async function runBsaleFactory() {
         };
         await sendTelegram(`${emoji} <b>${(product.name || '').trim()}</b> [${product.brand}]\nstock ${opts.total_stock} · 30d ${opts.units_sold_30d}\nGenerando ${status}...`);
 
-        // STEP 1: Find the REAL product image on boykot.cl. No image found = no post (skip slop).
-        const realImage = await findBoykotProductImage(product.name);
+        // STEP 1: Find the REAL product image on boykot.cl via WC Store API (search by SKU).
+        const realImage = await findBoykotProductImage(product);
         if (!realImage) {
-          await sendTelegram(`⚠️ ${emoji} <b>${(product.name || '').trim()}</b>\nNo encontrado en boykot.cl, skip (no posteamos slop)`);
+          await sendTelegram(`⚠️ ${emoji} <b>${(product.name || '').trim()}</b>\nNo está en boykot.cl (sku no match), skip — no posteamos slop`);
           console.log(`[bsale-factory] ${status} skip: ${product.name} not found on boykot.cl`);
           continue;
         }
 
-        // Show the real photo first so user sees what's being animated
-        await sendTelegramPhoto(realImage.url, `📸 ${emoji} Real: ${(product.name || '').trim()}`);
+        // Display name from boykot.cl (cleaner than Bsale's) + show the real photo
+        const displayName = realImage.wcName || (product.name || '').trim();
+        await sendTelegramPhoto(realImage.url, `📸 ${emoji} ${displayName}\n${realImage.productPageUrl}`);
 
         // STEP 2: Generate caption (LLM with template fallback)
         const caption = await llmCaption(product, status, opts);
