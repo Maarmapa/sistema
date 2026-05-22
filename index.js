@@ -492,11 +492,17 @@ async function upscaleImage(imageUrl, status = '') {
       console.error(`${tag} all body shapes failed — Magnific not usable for now`);
       return null;
     }
-    for (let i = 0; i < 30; i++) {
+    // Poll up to 4 min (60 × 4s) — Magnific can be slow on high-res images
+    let lastLoggedStatus = null;
+    for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 4000));
       const t = await (await fetch(`https://api.dev.runwayml.com/v1/tasks/${startData.id}`, {
         headers: { 'Authorization': 'Bearer ' + RUNWAY_KEY, 'X-Runway-Version': '2024-11-06' },
       })).json();
+      if (t.status !== lastLoggedStatus) {
+        console.log(`${tag} poll #${i} status=${t.status}`);
+        lastLoggedStatus = t.status;
+      }
       if (t.status === 'SUCCEEDED') {
         console.log(`${tag} SUCCEEDED → ${(t.output?.[0] || '').slice(0, 80)}`);
         return t.output?.[0] || null;
@@ -506,7 +512,7 @@ async function upscaleImage(imageUrl, status = '') {
         return null;
       }
     }
-    console.error(`${tag} timed out`);
+    console.error(`${tag} timed out after 4 min — falling back to raw`);
     return null;
   } catch (err) {
     console.error(`${tag} exception:`, err.message);
@@ -725,7 +731,7 @@ async function llmCaption(product, status, opts) {
     const urlLine = opts.product_url ? `Link al producto: ${opts.product_url}` : '';
 
     const res = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-20241022',
+      model: 'claude-haiku-4-5',
       max_tokens: 320,
       messages: [{
         role: 'user',
@@ -784,7 +790,7 @@ async function llmVisualPrompt(product, status) {
                    status === 'COLD' ? 'meditative still, soft single light pool, dust particles in light beam' :
                    'triumphant golden hero shot, centered, halo light';
     const res = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-20241022',
+      model: 'claude-haiku-4-5',
       max_tokens: 150,
       messages: [{
         role: 'user',
