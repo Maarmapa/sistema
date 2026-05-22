@@ -196,21 +196,20 @@ const BYSO_STYLE_REFS = {
   pomellato:  `${BYSO_REFS_BASE}/pomellato-ref.jpg`,
   miniatures: `${BYSO_REFS_BASE}/dscustomlab-ref.jpg`,
 };
+// Prompts comprimidos para entrar bajo 1000 chars (límite de Runway Gen-4 Image
+// promptText). Cada uno + BYSO_PRESERVATION_SUFFIX debe quedar <950 chars.
 const BYSO_STYLE_PROMPTS = {
-  // Concepto Pomellato Nudo: el COLLAR es la escala normal (cuelga del top del frame
-  // como una cadena/columpio), y hay UNA MUJER EN MINIATURA (tiny, proporcional a
-  // un eslabón) sentada sobre la cadena como si fuera un columpio infantil.
-  // El collar NO se deforma, solo cuelga formando la silueta de un columpio.
-  pomellato: `A tiny miniature woman figure sitting on the silver chain necklace as if it were a children's swing — the chain hangs from the top of the frame forming an elegant arc with the lowest point at the bottom, and the miniature woman sits at the bottom of the arc holding the two ascending sides as if they were the ropes of a swing, swinging gracefully in mid-air. The miniature woman is hyperrealistic, wearing elegant editorial fashion (slim trousers, heels, simple top), proportional to a single chain bead — she is TINY compared to the necklace. Pristine white seamless studio background, soft natural diffused light, dramatic spatial composition with negative space, editorial luxury jewelry campaign in the Pomellato Nudo aesthetic, magazine cover quality, hyperrealistic miniature human figure, photorealistic, sharp focus on both the necklace chain and the miniature woman. The necklace itself hangs naturally without deformation`,
-  // Concepto DS Custom Lab: collar GIGANTE en suelo, obreros en miniatura alrededor.
-  miniatures: `An elegant silver chain necklace displayed as a monumental sculpture being painted and customized by tiny miniature artisan figures wearing hardhats and overalls, with miniature scaffolding, ladders, paint buckets and brushes scattered around it. Tilt-shift miniature effect, dramatic scale play between the giant jewelry piece and the small workers, pristine white seamless studio background, soft museum lighting with subtle shadows, playful conceptual fashion advertising in the DS Custom Lab aesthetic, hyperrealistic miniature figures, premium editorial composition. The necklace lies naturally on the surface in its real shape`,
-  // Concepto lifestyle: la joya descansa en una superficie cotidiana premium.
-  lifestyle:  `An elegant silver chain necklace draped artfully across a soft warm-toned matte ceramic surface next to a delicate espresso cup and a single dried eucalyptus stem. Morning side light streaming from a window casts long soft elegant shadows, minimal Scandinavian aesthetic, muted earth tones, contemporary Instagram editorial mood, shallow depth of field, fashion magazine quality. The necklace is laid out naturally, exactly as the reference shows`,
+  // Pomellato: mini-mujer sentada en la cadena como columpio. Collar = escala normal,
+  // mujer = miniatura proporcional a un eslabón.
+  pomellato: `A tiny miniature woman sitting on the silver chain necklace as if it were a children's swing — the chain hangs from the top of the frame forming a graceful arc, the miniature woman sits at the bottom of the arc holding the two ascending sides as if they were swing ropes, swinging in mid-air. The woman is hyperrealistic in elegant editorial fashion, proportional to a single chain bead — TINY compared to the necklace. Pristine white seamless background, soft natural light, editorial Pomellato Nudo luxury aesthetic, magazine quality. The necklace hangs naturally without deformation`,
+  // DS Custom Lab: collar gigante, obreros miniatura alrededor.
+  miniatures: `The silver chain necklace displayed as a monumental sculpture being painted by tiny miniature artisan figures in hardhats, with miniature scaffolding, ladders and paint buckets scattered around it. Tilt-shift miniature effect, dramatic scale play between giant jewelry and small workers, pristine white seamless studio background, soft museum lighting, DS Custom Lab conceptual aesthetic, hyperrealistic miniatures, premium editorial. The necklace lies naturally in its real shape`,
+  // Lifestyle: joyería sobre superficie cotidiana premium.
+  lifestyle:  `The silver chain necklace draped naturally across a warm-toned matte ceramic surface next to a delicate espresso cup and a dried eucalyptus stem. Morning side light from a window, long soft shadows, minimal Scandinavian aesthetic, muted earth tones, Instagram editorial mood, shallow depth of field, fashion magazine quality`,
 };
 
-// Suffix anti-deformación aplicado a TODOS los estilos. Lenguaje quirúrgico para
-// que Runway respete la fidelidad de la joya por sobre la composición creativa.
-const BYSO_PRESERVATION_SUFFIX = `CRITICAL CONSTRAINT: The jewelry piece in this render MUST be identical to the reference product image — preserve the EXACT shape, EXACT chain link pattern, EXACT bead count and distribution, EXACT materials and EXACT metallic finish. DO NOT deform, distort, simplify, stretch, bend or modify the necklace in any way. The product is the hero of the image and must be photorealistically faithful to the reference. No text overlay, no logos, no watermarks, no brand marks.`;
+// Suffix anti-deformación — corto pero quirúrgico.
+const BYSO_PRESERVATION_SUFFIX = `CRITICAL: necklace must remain identical to reference — preserve exact shape, chain links, beads, materials and metallic finish. Never deform, distort, stretch, bend or modify the piece. No text or logos.`;
 
 async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
   try {
@@ -264,7 +263,13 @@ async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
     if (styleRefUrl) referenceImages.push({ uri: styleRefUrl, weight: 0.45 });
 
     const stylePrompt = BYSO_STYLE_PROMPTS[styleKey] || BYSO_STYLE_PROMPTS.lifestyle;
-    const promptText = `${stylePrompt}. ${BYSO_PRESERVATION_SUFFIX}`;
+    let promptText = `${stylePrompt}. ${BYSO_PRESERVATION_SUFFIX}`;
+    // Safety net: Runway Gen-4 Image cap is 1000 chars. Truncar defensivamente
+    // a 990 si algún edit futuro hace que el prompt crezca.
+    if (promptText.length > 990) {
+      console.warn(`[byso] promptText too long (${promptText.length}), truncating to 990`);
+      promptText = promptText.slice(0, 990);
+    }
 
     await sendTelegram('🎨 Generando render Gen-4 Image (ratio 9:16)...');
     const imageTask = await runway.textToImage.create({
@@ -455,7 +460,9 @@ Ej: <code>/byso pomellato https://byso.cl/collar-humo</code>
           await sendTelegram('Uso: <code>/byso [pomellato|miniatures|lifestyle] [url]</code>\nEj: <code>/byso pomellato https://byso.cl/collar-humo</code>');
         } else {
           await sendTelegram(`💎 Byso · estilo <b>${style}</b>`);
-          runBysoUrl(url, style);
+          // .catch() defensivo: si algo dentro de runBysoUrl tira un unhandled,
+          // logueamos y notificamos sin voltear el proceso (que afectaría Boykot).
+          runBysoUrl(url, style).catch(e => sendTelegram(`❌ Byso fatal: ${e.message}`).catch(() => {}));
         }
       } else if (msg.startsWith('/docu-boykot')) {
         const brand = msg.replace('/docu-boykot', '').trim() || 'default';
