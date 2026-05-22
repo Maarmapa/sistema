@@ -187,6 +187,89 @@ async function runBoykotUrl(productUrl) {
   }
 }
 
+// ── BYSO URL — Jumpseller scrape + Magnific 4K + Gen-4 Image + Gen-4.5 ─────
+// Test bench para freelance cliente Byso (joyería plata, byso.cl).
+// Mirror de runBoykotUrl pero adaptado a Jumpseller + estilo joyería + upscale.
+// Reference images (style refs de la clienta) servidas desde el propio repo.
+const BYSO_REFS_BASE = 'https://raw.githubusercontent.com/Maarmapa/sistema/main/refs/byso';
+const BYSO_STYLE_REFS = {
+  pomellato:  `${BYSO_REFS_BASE}/pomellato-ref.jpg`,
+  miniatures: `${BYSO_REFS_BASE}/dscustomlab-ref.jpg`,
+};
+const BYSO_STYLE_PROMPTS = {
+  pomellato: `Editorial luxury jewelry campaign in the Pomellato Nudo aesthetic: an elegant silver chain necklace suspended dramatically in space against a pristine white seamless background, the chain forming graceful arcs as if floating, dynamic suspended energy. A woman model partially visible interacting playfully with the chain. Soft natural diffused light, magazine cover quality, minimalist composition, sharp focus on jewelry details, ultra premium high jewelry fashion photography`,
+  miniatures: `Conceptual surrealist jewelry photography in the DS Custom Lab aesthetic: an elegant silver chain necklace displayed as a monumental sculpture being painted and customized by tiny miniature artisan figures wearing hardhats and overalls, with miniature scaffolding, ladders, paint buckets and brushes around it. Tilt-shift miniature effect, scale play, pristine white seamless studio background, soft museum lighting, playful and conceptual fashion advertising, hyperrealistic miniatures`,
+  lifestyle:  `Modern lifestyle jewelry product photography: an elegant silver chain necklace draped artfully across a soft warm-toned matte ceramic surface next to a delicate espresso cup and a single dried eucalyptus stem. Morning side light streaming from a window casts long soft elegant shadows, minimal Scandinavian aesthetic, muted earth tones, contemporary Instagram editorial mood, shallow depth of field, fashion magazine quality`,
+};
+
+async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
+  try {
+    await sendTelegram(`💎 <b>Byso</b> · scrapeando <code>${productUrl}</code>`);
+    const res = await fetch(productUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const html = await res.text();
+
+    // Jumpseller canonical (untransformed) image — pattern: /[id]/[filename].ext?[ts]
+    // Excludes /resize/, /thumb/, /format/ variants. Gives full-resolution (typ. 4000x4000).
+    const imgMatch = html.match(/https:\/\/cdnx\.jumpseller\.com\/by-so\/image\/\d+\/[A-Za-z][^"?\s]+\.(jpg|jpeg|png|webp)\?\d+/);
+    if (!imgMatch) { await sendTelegram('❌ No se encontró imagen canónica del producto'); return; }
+    const imgUrl = imgMatch[0];
+
+    // Product name — schema.org first, h1 fallback
+    const nameMatch = html.match(/"@type":\s*"Product"[^}]*?"name":\s*"([^"]+)"/) ||
+                      html.match(/<h1[^>]*>([^<]+)<\/h1>/);
+    const productName = (nameMatch?.[1] || 'Producto Byso').trim();
+
+    // Price — schema.org JSON ("price": "269900.0")
+    const priceMatch = html.match(/"price":\s*"?(\d+(?:\.\d+)?)"?/);
+    const price = priceMatch ? `$${Math.round(Number(priceMatch[1])).toLocaleString('es-CL')}` : '';
+
+    await sendTelegram(`💎 <b>${productName}</b>\n${price}\n🎨 Estilo: <b>${styleKey}</b>\n📤 Imagen 4K detectada · subiendo a Magnific...`);
+    await sendTelegramPhoto(imgUrl, `📸 Original: ${productName}`);
+
+    // STEP A: Magnific 4K upscale (más pixel signal = mejor render Gen-4)
+    const upscaled = await upscaleImage(imgUrl);
+    const highResUrl = upscaled || imgUrl;
+    await sendTelegram(upscaled ? '✅ Magnific upscale OK' : '⚠️ Magnific falló, sigo con original');
+
+    // STEP B: Gen-4 Image — producto + estilo de la clienta como references
+    const styleRefUrl = BYSO_STYLE_REFS[styleKey] || null;
+    const referenceImages = [{ uri: highResUrl, weight: 0.92 }];
+    if (styleRefUrl) referenceImages.push({ uri: styleRefUrl, weight: 0.5 });
+
+    const stylePrompt = BYSO_STYLE_PROMPTS[styleKey] || BYSO_STYLE_PROMPTS.lifestyle;
+    const promptText = `${stylePrompt}. Preserve the EXACT shape, chain links, beads, materials and metallic colors of the reference jewelry piece. Photorealistic, no text overlay, no logos.`;
+
+    await sendTelegram('🎨 Generando render Gen-4 Image (ratio 9:16)...');
+    const imageTask = await runway.textToImage.create({
+      model: 'gen4_image',
+      promptText,
+      referenceImages,
+      ratio: '1080:1920',
+    }).waitForTaskOutput();
+
+    const renderUrl = imageTask.output[0];
+    await sendTelegramPhoto(renderUrl, `🎨 Render Byso (${styleKey}): ${productName}`);
+
+    // STEP C: Gen-4.5 Video — animar el render
+    await sendTelegram('🎬 Animando con Gen-4.5...');
+    const videoTask = await runway.imageToVideo.create({
+      model: RUNWAY_MODEL,
+      promptImage: renderUrl,
+      promptText: `Slow cinematic ${productName} reveal, elegant subtle motion, dramatic light sweeps across silver surface, premium jewelry brand presentation, gentle parallax, editorial fashion film quality`,
+      duration: durationForModel(RUNWAY_MODEL, 5),
+      ratio: '720:1280',
+    }).waitForTaskOutput();
+
+    const caption = `🎬 <b>${productName}</b>${price ? '\n💎 ' + price : ''}\n🎨 Estilo: ${styleKey}\n\nbyso.cl ✨\n#byso #joyeriadeplata #chile`;
+    await sendTelegramVideo(videoTask.output[0], caption);
+    await sendTelegram(`✅ <b>Byso URL completo</b> · ${productName}`);
+
+  } catch (e) {
+    console.error('[byso-url] error:', e);
+    await sendTelegram(`❌ Byso error: ${e.message}`);
+  }
+}
+
 // ── BOYKOT FACTORY ────────────────────────────────────────────
 async function runBoykotFactory(mode = 'top', limit = 3) {
   console.log(`\n🛍️ BOYKOT FACTORY — mode: ${mode}`);
@@ -302,6 +385,11 @@ async function pollTelegram() {
 /boykot-marcas — Por marcas top (catálogo)
 /copic-award — Copic Award 2026
 
+<b>💎 Byso Test Bench</b> (freelance)
+/byso [estilo] [url] — Joyería byso.cl: Magnific 4K + Gen-4 Image + Gen-4.5
+Estilos: <code>pomellato</code> | <code>miniatures</code> | <code>lifestyle</code>
+Ej: <code>/byso pomellato https://byso.cl/collar-humo</code>
+
 <b>⏰ Crons automáticos (hora Chile)</b>
 23:00 — /produce diario (mini docu)
 06:00 — /bsale (HOT/COLD/STAR)
@@ -324,6 +412,24 @@ async function pollTelegram() {
         const url = msg.replace('/url ', '').trim();
         await sendTelegram('🛍️ Procesando producto...');
         runBoykotUrl(url);
+      } else if (msg.startsWith('/byso')) {
+        // /byso [style] [url]  ó  /byso [url] (default lifestyle)
+        // styles válidos: pomellato, miniatures, lifestyle
+        const parts = msg.replace(/^\/byso\s*/, '').trim().split(/\s+/);
+        let style = 'lifestyle';
+        let url = '';
+        if (['pomellato', 'miniatures', 'lifestyle'].includes(parts[0])) {
+          style = parts[0];
+          url = parts.slice(1).join(' ');
+        } else {
+          url = parts.join(' ');
+        }
+        if (!url || !url.startsWith('http')) {
+          await sendTelegram('Uso: <code>/byso [pomellato|miniatures|lifestyle] [url]</code>\nEj: <code>/byso pomellato https://byso.cl/collar-humo</code>');
+        } else {
+          await sendTelegram(`💎 Byso · estilo <b>${style}</b>`);
+          runBysoUrl(url, style);
+        }
       } else if (msg.startsWith('/docu-boykot')) {
         const brand = msg.replace('/docu-boykot', '').trim() || 'default';
         await sendTelegram('🎬 Iniciando Docu Boykot: ' + brand + '...');
@@ -1307,6 +1413,29 @@ const server = createServer(async (req, res) => {
         runBoykotFactory(mode || 'top', limit || 3);
       }
     });
+  } else if (req.method === 'POST' && req.url === '/byso') {
+    // Trigger remoto del flujo Byso para tests freelance (Jumpseller + Magnific + Gen-4 + Gen-4.5).
+    // Body: { url: string, style?: 'pomellato'|'miniatures'|'lifestyle' }
+    if (!requireAuth(req, res)) return;
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { url, style } = body ? JSON.parse(body) : {};
+        if (!url || !url.startsWith('http')) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'url requerido (byso.cl/...)' }));
+          return;
+        }
+        const styleKey = ['pomellato', 'miniatures', 'lifestyle'].includes(style) ? style : 'lifestyle';
+        res.writeHead(202);
+        res.end(JSON.stringify({ message: 'Byso URL started', url, style: styleKey }));
+        runBysoUrl(url, styleKey);
+      } catch (err) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
   } else if (req.method === 'GET' && req.url === '/films') {
     const dir = './films';
     const films = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
@@ -1323,6 +1452,7 @@ server.listen(PORT, () => {
   console.log(`🎥 SISTEMA on port ${PORT}`);
   console.log('📱 Telegram: @Maarmapabot');
   console.log('🛍️ /url [boykot url] — Gen-4 Image + Gen-4.5 Video');
+  console.log('💎 /byso [estilo] [byso.cl url] — Magnific 4K + Gen-4 + Gen-4.5');
 });
 
 // ── DOCU BOYKOT ───────────────────────────────────────────────
