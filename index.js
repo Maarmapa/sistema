@@ -284,8 +284,9 @@ async function pollTelegram() {
         await sendTelegram(
 `🎥 <b>SISTEMA</b> — Director autónomo + Fábrica Boykot
 
-<b>🛍️ Bsale Factory</b> ⭐ NEW
+<b>🛍️ Bsale Factory</b> ⭐
 /bsale — HOT 🔥 / COLD ❄️ / STAR ⭐ con datos reales de venta + imagen real de boykot.cl + reel 9:16
+/promote [texto] — generar UN reel del producto que busques (ej: /promote copic ciao layer mellow)
 
 <b>🎬 Mini Docu</b>
 /produce — Film del día (3 escenas)
@@ -339,6 +340,10 @@ async function pollTelegram() {
       } else if (msg === '/bsale') {
         await sendTelegram('🛍️ BSALE factory manual run...');
         runBsaleFactory();
+      } else if (msg.startsWith('/promote ')) {
+        const query = msg.replace('/promote ', '').trim();
+        await sendTelegram(`📣 Promote: buscando "${query}" en boykot.cl...`);
+        runPromote(query, 'HOT').catch(e => sendTelegram(`❌ Promote err: ${e.message}`));
       } else if (msg === '/boykot-top') {
         await sendTelegram('🛍️ Generando top productos Boykot...');
         runBoykotFactory('top', 3);
@@ -543,27 +548,35 @@ function letterbox9x16(sourceUrl, bg = '000000') {
 // 5. The yellow accent is in the LIGHT SOURCE in the background, which
 //    creates the moving highlight on the product. Product is not colored
 //    yellow — only the moving reflection is bright.
+// Motion prompts — IMPORTANT: avoid "atmosphere", "atmospheric", or any word
+// the model might render literally as text in the background (was producing
+// neon "atmosphere" signs). Use concrete physical descriptions instead:
+// smoke, mist, fog, particles, light beams.
+// Every prompt ends with explicit "no text, no words, no signage, no logos
+// in the scene" to suppress text hallucination.
+const NEG_TEXT = 'absolutely no text in the scene, no words, no letters, no signage, no neon signs with writing, no logos, no labels, no captions, no typography';
+
 const MOTION_PROMPTS = {
   HOT: [
-    'Product locked stationary at center with packaging colors preserved (white box stays white, branding readable), camera fixed frontal no rotation, a bright moving SPECULAR HIGHLIGHT travels rapidly across the product front surface from left to right (like a reflection of neon light passing over glossy packaging), acid yellow #CCFF00 neon light source visible in the background creating the highlight, atmospheric yellow particles drift, the highlight sweep IS the blast — product colors underneath remain true',
-    'Static product with original colors intact, camera fixed frontal no rotation, bright moving highlight band sweeps diagonally across the product surface (specular reflection moving), acid yellow neon visible in background as light source, atmospheric haze glows yellow in distance, product underneath highlight stays in true white packaging color',
-    'Product centered with package colors untouched, camera locked frontal no rotation, two bright specular highlights pulse and travel across the product front (rapid light reflections like passing under street neon), yellow neon environment in background, foreground product preserves all original colors beneath the moving highlights',
-    'Product sharp in center frame, camera fixed frontal no rotation, dramatic bright HIGHLIGHT SWEEP travels from bottom-left to top-right across the product surface revealing texture details (like a reflection passing over the box), yellow neon source in background, packaging colors preserved underneath',
-    'Stationary product in true original colors, camera locked frontal no rotation, bright moving highlight band races horizontally across the product front (specular reflection blast), yellow neon ATMOSPHERE pulses in background creating the highlight, product underneath stays in original packaging colors'
+    `Product locked stationary at center with packaging colors preserved (white box stays white, branding readable), camera fixed frontal no rotation, a bright moving SPECULAR HIGHLIGHT travels rapidly across the product front surface from left to right like a reflection of neon light passing over glossy packaging, acid yellow #CCFF00 neon glow light source visible in the background creating the highlight, fine yellow smoke particles drift slowly, the highlight sweep IS the blast — product colors underneath remain true. ${NEG_TEXT}`,
+    `Static product with original colors intact, camera fixed frontal no rotation, bright moving highlight band sweeps diagonally across the product surface (specular reflection moving), pure acid yellow neon glow visible in background as soft light source only, light yellow mist in distance, product underneath highlight stays in true white packaging color. ${NEG_TEXT}`,
+    `Product centered with package colors untouched, camera locked frontal no rotation, two bright specular highlights pulse and travel across the product front like rapid light reflections passing under street neon, soft yellow neon environment glow in background, foreground product preserves all original colors beneath the moving highlights. ${NEG_TEXT}`,
+    `Product sharp in center frame, camera fixed frontal no rotation, dramatic bright HIGHLIGHT SWEEP travels from bottom-left to top-right across the product surface revealing texture details like a reflection passing over the box, yellow neon glow source in background, packaging colors preserved underneath. ${NEG_TEXT}`,
+    `Stationary product in true original colors, camera locked frontal no rotation, bright moving highlight band races horizontally across the product front (specular reflection blast), pulsing yellow neon glow in background creating the highlight, product underneath stays in original packaging colors. ${NEG_TEXT}`
   ],
   COLD: [
-    'Product still and crisp with original colors preserved, camera fixed frontal no rotation, a gentle warm highlight slowly travels across the product surface left-to-right (soft specular reflection passing over packaging), warm ambient light source visible in background, dust motes drift gently, product underneath remains in true original colors',
-    'Static product with true colors untouched, camera locked frontal no rotation, soft golden highlight slowly sweeps across the product front surface (specular reflection like sunset light passing over packaging), warm glow in background, product underneath the moving highlight preserves package colors',
-    'Product unmoving in center with original colors, camera fixed frontal no rotation, slow soft highlight band drifts across the product face (a reveal sweep, like passing under a soft lamp), atmospheric haze in background, product colors stay true beneath the moving highlight',
-    'Product crisp centered with packaging colors preserved, camera locked frontal no rotation, gentle bright highlight gradually travels across the product surface revealing texture (soft specular sweep), atmospheric particles drift slowly in background, product underneath stays neutral white-balanced',
-    'Static product with original colors intact, camera fixed frontal no rotation, soft warm highlight slowly washes across the product surface (specular reflection drift), warm ambient source in background, product underneath highlight stays in true packaging colors'
+    `Product still and crisp with original colors preserved, camera fixed frontal no rotation, a gentle warm highlight slowly travels across the product surface left-to-right (soft specular reflection passing over packaging), warm ambient light source visible in background, fine dust motes drift gently in light beam, product underneath remains in true original colors. ${NEG_TEXT}`,
+    `Static product with true colors untouched, camera locked frontal no rotation, soft golden highlight slowly sweeps across the product front surface like sunset light passing over packaging, warm soft glow in background, product underneath the moving highlight preserves package colors. ${NEG_TEXT}`,
+    `Product unmoving in center with original colors, camera fixed frontal no rotation, slow soft highlight band drifts across the product face a reveal sweep like passing under a soft lamp, soft warm haze in background, product colors stay true beneath the moving highlight. ${NEG_TEXT}`,
+    `Product crisp centered with packaging colors preserved, camera locked frontal no rotation, gentle bright highlight gradually travels across the product surface revealing texture (soft specular sweep), fine dust particles drift slowly in background, product underneath stays neutral white-balanced. ${NEG_TEXT}`,
+    `Static product with original colors intact, camera fixed frontal no rotation, soft warm highlight slowly washes across the product surface (specular reflection drift), warm soft glow source in background, product underneath highlight stays in true packaging colors. ${NEG_TEXT}`
   ],
   STAR: [
-    'Product stationary with original colors intact, camera locked frontal no rotation, triumphant bright specular HIGHLIGHT sweeps across the product surface like a beam of glory passing over the packaging, golden light source in background, atmospheric particles, product underneath the highlight preserves all original colors',
-    'Static product centered with packaging colors preserved, camera fixed frontal no rotation, dramatic golden HIGHLIGHT band travels across product front from one side to other (specular reflection of overhead spotlight passing), lens flare in background, product underneath stays in true colors',
-    'Product crisp and unmoving with original colors, camera locked fixed frontal no rotation, golden bright highlight sweeps slowly across product surface revealing details (like a museum spotlight passing over an artifact), atmospheric smoke billows in distance, product underneath in original packaging colors',
-    'Stationary product with package colors intact, camera fixed frontal no rotation, strong golden moving highlight sweeps across product front and exits frame (specular reflection blast), back-rim light glows in background, atmospheric particles, product underneath remains true to its original colors',
-    'Product locked still in original colors, camera completely fixed frontal no rotation, dramatic bright highlight sweep travels across the product surface from dark to fully illuminated and back (specular reveal blast), lens flare in background at peak, product underneath stays in true original packaging colors throughout'
+    `Product stationary with original colors intact, camera locked frontal no rotation, triumphant bright specular HIGHLIGHT sweeps across the product surface like a beam of glory passing over the packaging, golden glow source in background, fine glowing particles drift, product underneath the highlight preserves all original colors. ${NEG_TEXT}`,
+    `Static product centered with packaging colors preserved, camera fixed frontal no rotation, dramatic golden HIGHLIGHT band travels across product front from one side to other (specular reflection of overhead spotlight passing), soft lens flare in background, product underneath stays in true colors. ${NEG_TEXT}`,
+    `Product crisp and unmoving with original colors, camera locked fixed frontal no rotation, golden bright highlight sweeps slowly across product surface revealing details like a museum spotlight passing over an artifact, soft warm haze in distance, product underneath in original packaging colors. ${NEG_TEXT}`,
+    `Stationary product with package colors intact, camera fixed frontal no rotation, strong golden moving highlight sweeps across product front and exits frame (specular reflection blast), back-rim warm glow in background, fine glowing particles, product underneath remains true to its original colors. ${NEG_TEXT}`,
+    `Product locked still in original colors, camera completely fixed frontal no rotation, dramatic bright highlight sweep travels across the product surface from dark to fully illuminated and back (specular reveal blast), soft lens flare in background at peak, product underneath stays in true original packaging colors throughout. ${NEG_TEXT}`
   ]
 };
 function pickMotion(status) {
@@ -808,6 +821,122 @@ Mandatory aesthetic constraints: black background, acid yellow #CCFF00 accent li
   } catch (err) {
     console.error('[llm] visual err:', err.message);
     return fallback;
+  }
+}
+
+// Manual promote — user picks a specific product to feature via /promote <query>.
+// Searches boykot.cl, picks first match with images, runs the full bsale pipeline
+// on it (Magnific or pillarbox + gen4.5 + Telegram push). Always treated as HOT
+// tone for the caption — assumed the user picked it for a reason.
+async function runPromote(query, status = 'HOT') {
+  try {
+    if (!query) {
+      await sendTelegram('Uso: /promote <texto>\nEj: /promote copic ciao mellow');
+      return;
+    }
+    const r = await fetch(`https://www.boykot.cl/wp-json/wc/store/products?search=${encodeURIComponent(query)}&per_page=5`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) });
+    const arr = await r.json();
+    if (!Array.isArray(arr) || arr.length === 0) {
+      await sendTelegram(`❌ No encontré "${query}" en boykot.cl`);
+      return;
+    }
+    const wc = arr.find(p => p.images?.[0]?.src);
+    if (!wc) {
+      await sendTelegram(`❌ Match sin imagen para "${query}"`);
+      return;
+    }
+    const cleanName = (wc.name || '').replace(/&amp;/g, '&').replace(/&#0?39;/g, "'").replace(/&quot;/g, '"');
+    const realImage = {
+      url: wc.images[0].src,
+      productPageUrl: wc.permalink,
+      wcName: cleanName,
+      wcSku: wc.sku,
+      priceRaw: wc.prices?.price || null,
+    };
+    const brandDetect = (cleanName.match(/copic|angelus|holbein|molotow|speedball|posca|sakura|derwent|prismacolor|faber|staedtler|liquitex|vallejo|arches|fabriano|winsor|moleskine|kuretake|acrilex|caran|schmincke|maimeri|sennelier|daler/i) || [''])[0];
+    const brandClean = brandDetect ? brandDetect[0].toUpperCase() + brandDetect.slice(1).toLowerCase() : 'Boykot';
+
+    const product = {
+      product_id: wc.id,
+      name: cleanName,
+      brand: brandClean,
+      totalSold: 0,
+      totalStock: 0,
+      variants: [],
+    };
+    const opts = {
+      brand: brandClean,
+      units_sold_30d: 0,
+      total_stock: 0,
+      price: realImage.priceRaw ? Number(realImage.priceRaw) : null,
+      product_url: realImage.productPageUrl,
+      display_name: cleanName,
+    };
+
+    await sendTelegram(`📣 <b>${cleanName}</b> [${brandClean}]\nGenerando ${status} ...`);
+    const priceLabel = opts.price ? `\n💰 $${opts.price.toLocaleString('es-CL')} CLP` : '';
+    await sendTelegramPhoto(realImage.url, `📸 <b>${cleanName}</b>${priceLabel}\n${realImage.productPageUrl}`);
+
+    const caption = await llmCaption(product, status, opts);
+    const dims = await getImageDimensions(realImage.url);
+    console.log(`[promote] source dims ${dims ? dims.width + 'x' + dims.height + ' aspect=' + dims.aspect.toFixed(2) : 'unknown'}`);
+
+    let sourceImage;
+    if (dims && dims.aspect > 1.3) {
+      sourceImage = `https://wsrv.nl/?url=${encodeURIComponent(realImage.url)}&w=720&h=1280&fit=contain&cbg=000000&output=jpg`;
+      console.log(`[promote] WIDE path → pillarbox raw via wsrv.nl`);
+    } else {
+      const upscaled = await upscaleImage(realImage.url, 'PROMOTE');
+      sourceImage = upscaled || realImage.url;
+      console.log(`[promote] SQUARE/VERT path → ${upscaled ? 'UPSCALED' : 'raw'}`);
+    }
+
+    const motionPrompt = pickMotion(status);
+    const useDur = durationForModel(RUNWAY_MODEL, 5);
+    console.log(`[promote] calling runway model=${RUNWAY_MODEL} duration=${useDur} ratio=720:1280`);
+
+    const startRes = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + RUNWAY_KEY,
+        'X-Runway-Version': '2024-11-06',
+      },
+      body: JSON.stringify({
+        model: RUNWAY_MODEL,
+        promptImage: sourceImage,
+        promptText: motionPrompt,
+        ratio: '720:1280',
+        duration: useDur,
+      }),
+    });
+    const startData = await startRes.json();
+    if (!startData.id) {
+      await sendTelegram(`❌ Runway rechazó la imagen: ${JSON.stringify(startData).slice(0, 150)}`);
+      return;
+    }
+    let videoUrl;
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 4000));
+      const t = await (await fetch(`https://api.dev.runwayml.com/v1/tasks/${startData.id}`, {
+        headers: { 'Authorization': 'Bearer ' + RUNWAY_KEY, 'X-Runway-Version': '2024-11-06' },
+      })).json();
+      if (t.status === 'SUCCEEDED') { videoUrl = t.output?.[0]; break; }
+      if (t.status === 'FAILED') {
+        await sendTelegram(`❌ Runway FAILED: ${JSON.stringify(t.failure || {}).slice(0, 150)}`);
+        return;
+      }
+    }
+    if (!videoUrl) {
+      await sendTelegram(`❌ Runway timed out`);
+      return;
+    }
+    await sendTelegramVideo(videoUrl, caption);
+    console.log(`[promote] video pushed for "${query}" → ${cleanName}`);
+  } catch (err) {
+    console.error('[promote] err:', err.message);
+    await sendTelegram(`❌ Promote err: ${err.message}`);
   }
 }
 
