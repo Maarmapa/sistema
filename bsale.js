@@ -175,23 +175,38 @@ export function classifyProducts(catalog, salesMap) {
   return { hot, cold, star };
 }
 
-// Pick one product per status, avoiding brand collision + recent post history.
+// Pick one product per status. SHUFFLE the pool first so that even when the
+// history file is wiped (Render free tier filesystem is ephemeral and resets
+// on every redeploy), each run gets variety instead of always picking the
+// top-ranked product.
 export function selectDailyPicks(classified, history) {
   const recentIds = new Set(history.slice(-42).map(h => h.product_id));
   const usedBrands = new Set();
 
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
   function pickAvoidingDupes(pool) {
-    for (const p of pool) {
+    // Shuffle a snapshot of the top-ranked pool. Even if history persistence
+    // fails, this guarantees variety between runs.
+    const shuffled = shuffle(pool);
+    for (const p of shuffled) {
       if (recentIds.has(p.product_id)) continue;
       if (usedBrands.has(p.brand)) continue;
       usedBrands.add(p.brand);
       return p;
     }
     // Fallback: ignore brand collision if no candidates left
-    for (const p of pool) {
+    for (const p of shuffled) {
       if (!recentIds.has(p.product_id)) return p;
     }
-    return pool[0] || null;
+    return shuffled[0] || null;
   }
 
   return {
