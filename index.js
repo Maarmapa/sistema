@@ -891,39 +891,79 @@ async function runBsaleFactory() {
         // STEP 2: Generate caption (LLM with template fallback), now with price + URL context
         const caption = await llmCaption(product, status, opts);
 
-        // STEP 3: Animate the REAL product image via Runway image-to-video.
-        // STEP A: Upscale source via Magnific (more pixel signal for small text)
-        const upscaled = await upscaleImage(realImage.url, status);
-        const highResUrl = upscaled || realImage.url;
-        if (upscaled) {
-          console.log(`[bsale-factory ${status}] using UPSCALED image`);
-        } else {
-          console.log(`[bsale-factory ${status}] upscale unavailable, using raw image`);
+        // STEP 3: Decide pipeline based on aspect ratio.
+        // - Square/vertical (aspect <= 1.3): Magnific upscale → gen4.5 direct
+        // - Wide products (aspect > 1.3): wsrv.nl pillarbox of RAW image → gen4.5
+        //   (skipping Magnific because wsrv.nl can't fetch Magnific's CloudFront
+        //   URL reliably + the pillarbox to 720x1280 throws away the extra pixels
+        //   anyway).
+        const dims = await getImageDimensions(realImage.url);
+        if (dims) {
+          console.log(`[bsale-factory ${status}] source dims ${dims.width}x${dims.height} aspect=${dims.aspect.toFixed(2)}`);
         }
 
-        // STEP B: Smart aspect-aware prep — pillarbox wide products only
-        const sourceImage = await prepareSourceForReel(highResUrl, status);
+        let sourceImage;
+        if (dims && dims.aspect > 1.3) {
+          // Wide path: pillarbox raw via wsrv.nl, skip Magnific
+          sourceImage = `https://wsrv.nl/?url=${encodeURIComponent(realImage.url)}&w=720&h=1280&fit=contain&cbg=000000&output=jpg`;
+          console.log(`[bsale-factory ${status}] WIDE path → pillarbox raw via wsrv.nl`);
+        } else {
+          // Square/vertical path: try Magnific upscale for sharper text, fall back to raw
+          const upscaled = await upscaleImage(realImage.url, status);
+          sourceImage = upscaled || realImage.url;
+          console.log(`[bsale-factory ${status}] SQUARE/VERT path → ${upscaled ? 'UPSCALED via Magnific' : 'raw (upscale failed)'}`);
+        }
 
         const motionPrompt = pickMotion(status);
         const useDur = durationForModel(RUNWAY_MODEL, 5);
         console.log(`[bsale-factory ${status}] calling runway model=${RUNWAY_MODEL} duration=${useDur} ratio=720:1280 source=${sourceImage.slice(0, 80)}...`);
 
-        let videoUrl;
-        try {
-          const vid = await runway.imageToVideo.create({
-            model: RUNWAY_MODEL,
-            promptImage: sourceImage,
-            promptText: motionPrompt,
-            duration: useDur,
-            ratio: '720:1280',
-          }).waitForTaskOutput();
-          videoUrl = vid.output?.[0];
-          console.log(`[bsale-factory ${status}] runway returned: ${videoUrl ? videoUrl.slice(0, 80) : 'EMPTY OUTPUT'}`);
-        } catch (rErr) {
-          console.error(`[bsale-factory ${status}] runway SDK threw: ${rErr.message}`);
-          throw new Error(`runway: ${rErr.message}`);
+        // Direct HTTP to Runway API with gen4_turbo fallback if main model fails
+        async function callRunwayDirect(model) {
+          const startRes = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + RUNWAY_KEY,
+              'X-Runway-Version': '2024-11-06',
+            },
+            body: JSON.stringify({
+              model,
+              promptImage: sourceImage,
+              promptText: motionPrompt,
+              ratio: '720:1280',
+              duration: durationForModel(model, 5),
+            }),
+          });
+          const startData = await startRes.json();
+          if (!startData.id) {
+            console.error(`[bsale-factory ${status}] ${model} rejected: ${JSON.stringify(startData).slice(0, 200)}`);
+            return null;
+          }
+          for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 4000));
+            const t = await (await fetch(`https://api.dev.runwayml.com/v1/tasks/${startData.id}`, {
+              headers: { 'Authorization': 'Bearer ' + RUNWAY_KEY, 'X-Runway-Version': '2024-11-06' },
+            })).json();
+            if (t.status === 'SUCCEEDED') return t.output?.[0] || null;
+            if (t.status === 'FAILED') {
+              console.error(`[bsale-factory ${status}] ${model} FAILED: ${JSON.stringify(t.failure || {}).slice(0, 200)}`);
+              return null;
+            }
+          }
+          console.error(`[bsale-factory ${status}] ${model} timed out`);
+          return null;
         }
-        if (!videoUrl) throw new Error('video gen returned empty output');
+
+        let videoUrl = await callRunwayDirect(RUNWAY_MODEL);
+        if (!videoUrl && RUNWAY_MODEL !== RUNWAY_MODEL_FAST) {
+          console.log(`[bsale-factory ${status}] ${RUNWAY_MODEL} failed, falling back to ${RUNWAY_MODEL_FAST}`);
+          videoUrl = await callRunwayDirect(RUNWAY_MODEL_FAST);
+        }
+        if (!videoUrl) {
+          throw new Error(`runway: both ${RUNWAY_MODEL} and ${RUNWAY_MODEL_FAST} failed`);
+        }
+        console.log(`[bsale-factory ${status}] video URL ready: ${videoUrl.slice(0, 80)}`);
         await sendTelegramVideo(videoUrl, caption);
         console.log(`[bsale-factory ${status}] video pushed to Telegram OK`);
 
