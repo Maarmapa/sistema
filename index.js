@@ -620,52 +620,111 @@ async function findBoykotProductImage(product) {
 }
 
 // ── BSALE FACTORY — sales-driven content with HOT/COLD/STAR classification ────
+// Templates by brand — speaks the artist's language, not the seller's.
+// Sales data drives SELECTION (which product to feature) — never appears
+// in the public-facing caption.
+const BRAND_VOICE = {
+  Copic: 'Marcadores base alcohol para ilustradores, manga, anime, fashion design. Tinta recargable, mezclable.',
+  Angelus: 'Pintura acrílica especializada para cuero y zapatillas. La marca de los pintores de sneakers.',
+  Holbein: 'Acuarela y gouache de tradición japonesa. Pigmentos densos, mezcla limpia.',
+  Molotow: 'Marcadores y aerosoles para graffiti, street art, ilustración profesional.',
+  Speedball: 'Caligrafía, ink, plumillas. Lo clásico que enseñan en escuelas de arte.',
+  'Winsor & Newton': 'Acuarela y óleo profesional con 150+ años. Pigmentos premium.',
+  Fabriano: 'Papel italiano, base para acuarela y dibujo seria.',
+  Sakura: 'Crayolas, pastel, gel pens. Materiales de educación artística.',
+  Derwent: 'Lápices de color y grafito britanico. Para realismo y bocetos.',
+  Posca: 'Marcador acrílico de punta dura para cualquier superficie.',
+  Acrilex: 'Acrílico nacional brasileño, asequible y versátil.',
+  Kuretake: 'Tinta y caligrafía japonesa, sumi-e, manga.',
+  'Daler-Rowney': 'Pinceles y acuarela inglesa, tradición académica.',
+  Vallejo: 'Pintura acrílica para modelismo, miniatura, fine detail.',
+  Arches: 'Papel acuarela 100% algodón francés, gold standard.',
+  "Caran d'Ache": 'Suizos premium — lápices, acuarela, materiales luxe.',
+  'Faber-Castell': 'Alemán clásico, lápices y materiales de dibujo confiables.',
+  Staedtler: 'Marcadores y lápices técnicos alemanes.',
+  Liquitex: 'Acrílico profesional, medios, fluidos modernos.',
+  Prismacolor: 'Lápices de color soft, blending intenso.',
+};
+
 function templateCaption(product, status, opts) {
   const name = (opts.display_name || product.name || 'Producto').trim();
   const brand = opts.brand || 'Boykot';
   const tag = brand.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const brandLine = BRAND_VOICE[brand] || '';
   const priceLine = opts.price ? `\n💰 $${opts.price.toLocaleString('es-CL')} CLP` : '';
   const urlLine = opts.product_url ? `\n🔗 ${opts.product_url}` : '\nboykot.cl';
 
+  // Subtle scarcity / popularity hooks per status — NO numbers, no internal data
+  let hook = '';
   if (status === 'HOT') {
-    return `🔥 <b>${name}</b>\nVuelan los ${brand}. ${opts.units_sold_30d} unidades movidas en los últimos 30 días.\nQuedan ${opts.total_stock} en stock — al ritmo que van, no duran.${priceLine}${urlLine}\n\n#boykot #${tag} #arte #chile`;
+    hook = brandLine ? `${brandLine}\n\nTendencia esta semana entre quienes los usan.` : 'Tendencia esta semana.';
+  } else if (status === 'COLD') {
+    hook = brandLine ? `${brandLine}\n\nUna herramienta que vale la pena redescubrir.` : 'Una herramienta que vale la pena redescubrir.';
+  } else {
+    // STAR
+    hook = brandLine ? `${brandLine}\n\nDe los favoritos del mes en el catálogo.` : 'De los favoritos del mes.';
   }
-  if (status === 'COLD') {
-    return `❄️ <b>${name}</b>\nLo redescubrimos. ${brand} acumulando polvo en el rincón, sin movimiento hace semanas.\n${opts.total_stock} unidades esperando que alguien las pruebe.${priceLine}${urlLine}\n\n#boykot #${tag} #arte #chile`;
-  }
-  return `⭐ <b>${name}</b>\nLos pintores saben. ${brand} en el top vendidos del mes — ${opts.units_sold_30d} unidades.${priceLine}${urlLine}\n\n#boykot #${tag} #arte #chile`;
+
+  const emoji = status === 'HOT' ? '🔥' : status === 'COLD' ? '❄️' : '⭐';
+  return `${emoji} <b>${name}</b>\n${hook}${priceLine}${urlLine}\n\n#boykot #${tag} #arte #chile`;
 }
 
 async function llmCaption(product, status, opts) {
   const fallback = templateCaption(product, status, opts);
   if (!anthropic) return fallback;
   try {
-    const tone = status === 'HOT' ? 'urgente, sentido de FOMO, vuela el stock'
-               : status === 'COLD' ? 'poético, joya redescubierta, invita a probar'
-               : 'triunfal, los favoritos del mes, social proof';
-    const priceLine = opts.price ? `Precio: $${opts.price.toLocaleString('es-CL')} CLP\n` : '';
-    const urlLine = opts.product_url ? `Link directo al producto: ${opts.product_url}\n` : '';
+    // Status drives angle, NOT sales data shown to reader
+    const angle = status === 'HOT'
+      ? 'Producto que está captando interés esta temporada. Tono: entusiasmo natural, hablás del USO del producto, técnica, lo que se logra. No menciones que se vende mucho.'
+      : status === 'COLD'
+      ? 'Producto valioso que merece más atención. Tono: invitación a probar, redescubrimiento, lo que aporta a la práctica del artista. No menciones que no se vendió.'
+      : 'Producto querido en la comunidad. Tono: validación curatorial, lo que lo hace especial, por qué muchos lo usan. Subtle social proof, no estadísticas.';
+
+    const priceLine = opts.price ? `Precio: $${opts.price.toLocaleString('es-CL')} CLP` : '';
+    const urlLine = opts.product_url ? `Link al producto: ${opts.product_url}` : '';
+
     const res = await anthropic.messages.create({
       model: 'claude-3-5-haiku-20241022',
       max_tokens: 320,
       messages: [{
         role: 'user',
-        content: `Escribí UN caption para Instagram Reel de Boykot.cl (tienda de arte chilena online), tono ${tone}, 60-100 palabras, en español rioplatense/chileno neutro.
+        content: `Escribí UN caption para Instagram Reel de Boykot.cl (tienda chilena de materiales de arte), 50-90 palabras, español rioplatense/chileno neutro.
+
+Hablás como ARTISTA recomendando a otra artista — no como vendedor moviendo stock.
 
 Producto: ${(opts.display_name || product.name || '').trim()}
 Marca: ${opts.brand}
-Status: ${status}
-Vendidos últimos 30 días: ${opts.units_sold_30d}
-Stock actual: ${opts.total_stock} unidades
-${priceLine}${urlLine}
-Reglas:
-- HTML válido para Telegram: SOLO <b>negrita</b> y emojis. NO <em>, <i>, <p>, ni otros tags.
-- Mencioná el precio naturalmente UNA vez si te lo doy.
-- Cerrá el caption con el link directo al producto en línea separada (si lo tengo).
-- Sin frases tipo "compralo ya", "no te lo pierdas" — sin hard sell.
-- Que suene hecho a mano por un artista, no genérico de marketing.
-- 3-5 hashtags al final, incluyendo #boykot y la marca.
-- Devolvé SOLO el caption, sin explicación previa.`,
+Ángulo: ${angle}
+${priceLine}
+${urlLine}
+
+REGLAS DE COPY:
+- Hablá del USO del producto, su TÉCNICA, lo que LOGRA, qué tipo de artista lo elige.
+- NO mencionés números de ventas, stock disponible, ni "X unidades vendidas".
+- NO uses frases tipo "no te lo pierdas", "vuelan", "compralo ya", "se acaba".
+- Sí podés usar scarcity suave: "edición limitada", "recién llegado", "rare drop", "edición especial" — solo si es genuino.
+- El precio podés mencionarlo UNA vez, casual.
+- Cerrá con el link en línea separada.
+- 3-5 hashtags al final: #boykot + marca + 1-2 hashtags de técnica/categoría (ej. #manga #sneakerpaint #acuarela #watercolor).
+
+REGLAS DE FORMATO:
+- HTML para Telegram: SOLO <b>negrita</b> y emojis. NO <em>, <i>, <p>, ni otros tags.
+- Devolvé SOLO el caption, sin explicación previa.
+
+Ejemplo del tono que quiero (sobre un Copic Ciao):
+"🔥 <b>Copic Ciao Layer & Mix: MANGA Mellow</b>
+
+Trinity de pastel para el género shojo: BG-72, RV-34, E-21. Tres marcadores curados para que un colorista de manga empiece o complete su paleta sin solapar tonos. Punta brush + medium broad — relleno y sombra del mismo marcador.
+
+Recargables con Copic INK, hasta 9 veces.
+
+💰 $9.800
+
+🔗 https://www.boykot.cl/...
+
+#boykot #copic #manga #ciao #ilustracion"
+
+Notá: ZERO mención de "47 unidades", "stock 12", "vuelan". Solo arte.`,
       }],
     });
     const text = res.content?.[0]?.text?.trim();
