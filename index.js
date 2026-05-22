@@ -314,11 +314,32 @@ async function runAnimateUrl(imageUrl, customPrompt) {
     const motionPrompt = customPrompt || `Slow cinematic reveal with subtle motion, gentle parallax camera, dramatic soft light sweeps across the subject, premium luxury jewelry brand presentation, editorial fashion film quality, slight natural sway`;
 
     await sendTelegramPhoto(imageUrl, '📸 Frame de entrada');
+
+    // STEP A (opcional): Magnific upscale si la imagen es chica.
+    // Gen-4.5 produce mejor video con frames de mayor resolución, pero Magnific
+    // tiene cap de output ~16MP (input ≤2000px en cualquier eje). Aplicamos la
+    // misma lógica smart que /byso: si ya es ≥2000px, salta; si es chica, sube.
+    const dims = await getImageDimensions(imageUrl);
+    const needsUpscale = dims && Math.max(dims.width || 0, dims.height || 0) < 2000;
+    let frameUrl = imageUrl;
+    if (needsUpscale) {
+      await sendTelegram(`📤 Imagen ${dims.width}x${dims.height} · subiendo a Magnific antes de animar...`);
+      const upscaled = await upscaleImage(imageUrl, 'animar');
+      if (upscaled) {
+        frameUrl = upscaled;
+        await sendTelegram('✅ Magnific upscale OK');
+      } else {
+        await sendTelegram('⚠️ Magnific falló, sigo con original');
+      }
+    } else if (dims) {
+      await sendTelegram(`⏭️ Imagen ya es alta-res (${dims.width}x${dims.height}) · salto Magnific`);
+    }
+
     await sendTelegram(`🎬 Generando video Gen-4.5 (5s · 9:16)...`);
 
     const videoTask = await runway.imageToVideo.create({
       model: RUNWAY_MODEL,
-      promptImage: imageUrl,
+      promptImage: frameUrl,
       promptText: motionPrompt,
       duration: durationForModel(RUNWAY_MODEL, 5),
       ratio: '720:1280',
