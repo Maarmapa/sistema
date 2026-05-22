@@ -361,6 +361,58 @@ async function pollTelegram() {
 // ── IMAGE PADDING — letterbox to 9:16 so wide products aren't cropped ────
 // Uses wsrv.nl (Cloudflare-backed free image transform service) to wrap any
 // source image inside a 720x1280 black canvas with fit=contain (no crop).
+// Read image dimensions from JPEG header (first ~64KB is enough for SOF marker).
+// Returns { width, height, aspect } or null if can't determine.
+async function getImageDimensions(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { 'Range': 'bytes=0-65535', 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok && res.status !== 206) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    // Find JPEG Start-Of-Frame marker (0xFFC0 to 0xFFCF, except 0xFFC4/C8/CC)
+    for (let i = 0; i < buf.length - 9; i++) {
+      if (buf[i] !== 0xFF) continue;
+      const marker = buf[i + 1];
+      if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+        const height = buf.readUInt16BE(i + 5);
+        const width = buf.readUInt16BE(i + 7);
+        if (width > 0 && height > 0) return { width, height, aspect: width / height };
+      }
+    }
+    // PNG fallback: check PNG IHDR
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+      const width = buf.readUInt32BE(16);
+      const height = buf.readUInt32BE(20);
+      if (width > 0 && height > 0) return { width, height, aspect: width / height };
+    }
+    return null;
+  } catch (err) {
+    console.error('[dims] err:', err.message);
+    return null;
+  }
+}
+
+// Prepare a source image for 9:16 reel generation.
+// - Square / vertical product (aspect <= 1.3): pass raw — preserves motion best.
+// - Wide product (aspect > 1.3): pillarbox via wsrv.nl to 9:16 so the product
+//   isn't laterally cropped. We sacrifice some motion freedom for fidelity.
+async function prepareSourceForReel(imageUrl) {
+  const dims = await getImageDimensions(imageUrl);
+  if (!dims) {
+    console.log(`[reel-prep] could not read dims for ${imageUrl.slice(0, 80)}, using raw`);
+    return imageUrl;
+  }
+  console.log(`[reel-prep] source ${dims.width}x${dims.height} aspect=${dims.aspect.toFixed(2)}`);
+  if (dims.aspect > 1.3) {
+    const padded = `https://wsrv.nl/?url=${encodeURIComponent(imageUrl)}&w=720&h=1280&fit=contain&cbg=000000&output=jpg`;
+    console.log(`[reel-prep] WIDE product (aspect ${dims.aspect.toFixed(2)}:1) — pillarbox to 9:16`);
+    return padded;
+  }
+  return imageUrl;
+}
+
 // Upscale a source image via Runway Magnific before feeding it to video gen.
 // Higher resolution input = better small-text preservation in gen4.5/veo3.1.
 // Returns the upscaled URL or null on failure (caller should fall back to raw).
@@ -720,17 +772,17 @@ async function runBsaleFactory() {
         const caption = await llmCaption(product, status, opts);
 
         // STEP 3: Animate the REAL product image via Runway image-to-video.
-        // Upscale source image via Magnific to preserve small text in the video.
-        // The boykot.cl image is 2560px max — Magnific brings it to higher res
-        // so gen4.5 has more pixel signal for small letters (color codes, brand,
-        // "made in", etc.). Falls back to raw if upscale fails.
+        // STEP A: Upscale source via Magnific (more pixel signal for small text)
         const upscaled = await upscaleImage(realImage.url);
-        const sourceImage = upscaled || realImage.url;
+        const highResUrl = upscaled || realImage.url;
         if (upscaled) {
           console.log(`[bsale-factory] ${status} using UPSCALED image`);
         } else {
           console.log(`[bsale-factory] ${status} upscale unavailable, using raw image`);
         }
+
+        // STEP B: Smart aspect-aware prep — pillarbox wide products only
+        const sourceImage = await prepareSourceForReel(highResUrl);
 
         const motionPrompt = pickMotion(status);
 
