@@ -398,16 +398,17 @@ async function getImageDimensions(url) {
 // - Square / vertical product (aspect <= 1.3): pass raw — preserves motion best.
 // - Wide product (aspect > 1.3): pillarbox via wsrv.nl to 9:16 so the product
 //   isn't laterally cropped. We sacrifice some motion freedom for fidelity.
-async function prepareSourceForReel(imageUrl) {
+async function prepareSourceForReel(imageUrl, status = '') {
+  const tag = status ? `[reel-prep ${status}]` : '[reel-prep]';
   const dims = await getImageDimensions(imageUrl);
   if (!dims) {
-    console.log(`[reel-prep] could not read dims for ${imageUrl.slice(0, 80)}, using raw`);
+    console.log(`${tag} could not read dims for ${imageUrl.slice(0, 80)}, using raw`);
     return imageUrl;
   }
-  console.log(`[reel-prep] source ${dims.width}x${dims.height} aspect=${dims.aspect.toFixed(2)}`);
+  console.log(`${tag} source ${dims.width}x${dims.height} aspect=${dims.aspect.toFixed(2)}`);
   if (dims.aspect > 1.3) {
     const padded = `https://wsrv.nl/?url=${encodeURIComponent(imageUrl)}&w=720&h=1280&fit=contain&cbg=000000&output=jpg`;
-    console.log(`[reel-prep] WIDE product (aspect ${dims.aspect.toFixed(2)}:1) — pillarbox to 9:16`);
+    console.log(`${tag} WIDE product (aspect ${dims.aspect.toFixed(2)}:1) — pillarbox to 9:16`);
     return padded;
   }
   return imageUrl;
@@ -416,9 +417,10 @@ async function prepareSourceForReel(imageUrl) {
 // Upscale a source image via Runway Magnific before feeding it to video gen.
 // Higher resolution input = better small-text preservation in gen4.5/veo3.1.
 // Returns the upscaled URL or null on failure (caller should fall back to raw).
-async function upscaleImage(imageUrl) {
+async function upscaleImage(imageUrl, status = '') {
+  const tag = status ? `[upscale ${status}]` : '[upscale]';
   try {
-    console.log(`[upscale] starting magnific on ${imageUrl.slice(0, 80)}...`);
+    console.log(`${tag} starting magnific on ${imageUrl.slice(0, 80)}...`);
     // Try multiple body shapes — Runway docs don't expose image_upscale schema explicitly
     const bodyShapes = [
       { model: 'magnific_precision_upscaler_v2', imageUri: imageUrl },
@@ -442,13 +444,13 @@ async function upscaleImage(imageUrl) {
       startStatus = startRes.status;
       startData = await startRes.json();
       if (startData?.id) {
-        console.log(`[upscale] ✅ body shape "${fieldName}" accepted, task id=${startData.id}`);
+        console.log(`${tag} ✅ body shape "${fieldName}" accepted, task id=${startData.id}`);
         break;
       }
-      console.log(`[upscale] body shape "${fieldName}" rejected (${startStatus}): ${JSON.stringify(startData).slice(0, 250)}`);
+      console.log(`${tag} body shape "${fieldName}" rejected (${startStatus}): ${JSON.stringify(startData).slice(0, 250)}`);
     }
     if (!startData?.id) {
-      console.error(`[upscale] all body shapes failed — Magnific not usable for now`);
+      console.error(`${tag} all body shapes failed — Magnific not usable for now`);
       return null;
     }
     for (let i = 0; i < 30; i++) {
@@ -457,18 +459,18 @@ async function upscaleImage(imageUrl) {
         headers: { 'Authorization': 'Bearer ' + RUNWAY_KEY, 'X-Runway-Version': '2024-11-06' },
       })).json();
       if (t.status === 'SUCCEEDED') {
-        console.log(`[upscale] SUCCEEDED → ${(t.output?.[0] || '').slice(0, 80)}`);
+        console.log(`${tag} SUCCEEDED → ${(t.output?.[0] || '').slice(0, 80)}`);
         return t.output?.[0] || null;
       }
       if (t.status === 'FAILED') {
-        console.error(`[upscale] FAILED: ${JSON.stringify(t.failure || t).slice(0, 250)}`);
+        console.error(`${tag} FAILED: ${JSON.stringify(t.failure || t).slice(0, 250)}`);
         return null;
       }
     }
-    console.error('[upscale] timed out');
+    console.error(`${tag} timed out`);
     return null;
   } catch (err) {
-    console.error('[upscale] exception:', err.message);
+    console.error(`${tag} exception:`, err.message);
     return null;
   }
 }
@@ -846,29 +848,39 @@ async function runBsaleFactory() {
 
         // STEP 3: Animate the REAL product image via Runway image-to-video.
         // STEP A: Upscale source via Magnific (more pixel signal for small text)
-        const upscaled = await upscaleImage(realImage.url);
+        const upscaled = await upscaleImage(realImage.url, status);
         const highResUrl = upscaled || realImage.url;
         if (upscaled) {
-          console.log(`[bsale-factory] ${status} using UPSCALED image`);
+          console.log(`[bsale-factory ${status}] using UPSCALED image`);
         } else {
-          console.log(`[bsale-factory] ${status} upscale unavailable, using raw image`);
+          console.log(`[bsale-factory ${status}] upscale unavailable, using raw image`);
         }
 
         // STEP B: Smart aspect-aware prep — pillarbox wide products only
-        const sourceImage = await prepareSourceForReel(highResUrl);
+        const sourceImage = await prepareSourceForReel(highResUrl, status);
 
         const motionPrompt = pickMotion(status);
+        const useDur = durationForModel(RUNWAY_MODEL, 5);
+        console.log(`[bsale-factory ${status}] calling runway model=${RUNWAY_MODEL} duration=${useDur} ratio=720:1280 source=${sourceImage.slice(0, 80)}...`);
 
-        const vid = await runway.imageToVideo.create({
-          model: RUNWAY_MODEL,
-          promptImage: sourceImage,
-          promptText: motionPrompt,
-          duration: durationForModel(RUNWAY_MODEL, 5),
-          ratio: '720:1280',
-        }).waitForTaskOutput();
-        const videoUrl = vid.output?.[0];
-        if (!videoUrl) throw new Error('video gen failed');
+        let videoUrl;
+        try {
+          const vid = await runway.imageToVideo.create({
+            model: RUNWAY_MODEL,
+            promptImage: sourceImage,
+            promptText: motionPrompt,
+            duration: useDur,
+            ratio: '720:1280',
+          }).waitForTaskOutput();
+          videoUrl = vid.output?.[0];
+          console.log(`[bsale-factory ${status}] runway returned: ${videoUrl ? videoUrl.slice(0, 80) : 'EMPTY OUTPUT'}`);
+        } catch (rErr) {
+          console.error(`[bsale-factory ${status}] runway SDK threw: ${rErr.message}`);
+          throw new Error(`runway: ${rErr.message}`);
+        }
+        if (!videoUrl) throw new Error('video gen returned empty output');
         await sendTelegramVideo(videoUrl, caption);
+        console.log(`[bsale-factory ${status}] video pushed to Telegram OK`);
 
         bsale.recordPost(history, product, status);
         posted++;
