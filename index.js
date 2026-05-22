@@ -361,6 +361,52 @@ async function pollTelegram() {
 // ── IMAGE PADDING — letterbox to 9:16 so wide products aren't cropped ────
 // Uses wsrv.nl (Cloudflare-backed free image transform service) to wrap any
 // source image inside a 720x1280 black canvas with fit=contain (no crop).
+// Upscale a source image via Runway Magnific before feeding it to video gen.
+// Higher resolution input = better small-text preservation in gen4.5/veo3.1.
+// Returns the upscaled URL or null on failure (caller should fall back to raw).
+async function upscaleImage(imageUrl) {
+  try {
+    console.log(`[upscale] starting magnific on ${imageUrl.slice(0, 80)}...`);
+    const startRes = await fetch('https://api.dev.runwayml.com/v1/image_upscale', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + RUNWAY_KEY,
+        'X-Runway-Version': '2024-11-06',
+      },
+      body: JSON.stringify({
+        model: 'magnific_precision_upscaler_v2',
+        imageUrl: imageUrl,
+      }),
+    });
+    const startData = await startRes.json();
+    console.log(`[upscale] start status=${startRes.status} id=${startData.id || 'NONE'}`);
+    if (!startData.id) {
+      console.error(`[upscale] failed to start: ${JSON.stringify(startData).slice(0, 200)}`);
+      return null;
+    }
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 4000));
+      const t = await (await fetch(`https://api.dev.runwayml.com/v1/tasks/${startData.id}`, {
+        headers: { 'Authorization': 'Bearer ' + RUNWAY_KEY, 'X-Runway-Version': '2024-11-06' },
+      })).json();
+      if (t.status === 'SUCCEEDED') {
+        console.log(`[upscale] SUCCEEDED → ${t.output?.[0]?.slice(0, 80)}`);
+        return t.output?.[0] || null;
+      }
+      if (t.status === 'FAILED') {
+        console.error(`[upscale] FAILED: ${JSON.stringify(t.failure || {}).slice(0, 200)}`);
+        return null;
+      }
+    }
+    console.error('[upscale] timed out');
+    return null;
+  } catch (err) {
+    console.error('[upscale] exception:', err.message);
+    return null;
+  }
+}
+
 function letterbox9x16(sourceUrl, bg = '000000') {
   if (!sourceUrl) return sourceUrl;
   return `https://wsrv.nl/?url=${encodeURIComponent(sourceUrl)}&w=720&h=1280&fit=contain&cbg=${bg}&we&output=jpg`;
@@ -674,12 +720,18 @@ async function runBsaleFactory() {
         const caption = await llmCaption(product, status, opts);
 
         // STEP 3: Animate the REAL product image via Runway image-to-video.
-        // Input is letterboxed to 9:16 BEFORE Runway sees it, so wide products
-        // are never laterally cropped. Motion prompt is randomized from a pool
-        // per status to avoid repetition between successive cron runs.
-        // Pass raw image to Runway — letterbox padding was killing motion
-        // (filled frame with static black borders, model had nothing to animate)
-        const sourceImage = realImage.url;
+        // Upscale source image via Magnific to preserve small text in the video.
+        // The boykot.cl image is 2560px max — Magnific brings it to higher res
+        // so gen4.5 has more pixel signal for small letters (color codes, brand,
+        // "made in", etc.). Falls back to raw if upscale fails.
+        const upscaled = await upscaleImage(realImage.url);
+        const sourceImage = upscaled || realImage.url;
+        if (upscaled) {
+          console.log(`[bsale-factory] ${status} using UPSCALED image`);
+        } else {
+          console.log(`[bsale-factory] ${status} upscale unavailable, using raw image`);
+        }
+
         const motionPrompt = pickMotion(status);
 
         const vid = await runway.imageToVideo.create({
@@ -710,7 +762,14 @@ async function runBsaleFactory() {
 }
 
 // ── SCHEDULER ─────────────────────────────────────────────────
-cron.schedule('0 3 * * *', () => produce());
+// Cron schedule (UTC; user is Chile UTC-4 in winter):
+// - 03:00 UTC = 23:00 Chile (previous night) — was produce() with hardcoded
+//   generic "paintbrush" scenes; replaced with real-product bsale factory.
+//   produce() function still exists for manual /produce or /tema commands.
+// - 10:00 UTC = 06:00 Chile (morning) — main bsale daily run
+// - 16:00 UTC = 12:00 Chile — boykot liquidacion (legacy gen4_turbo flow)
+// - 16:42 UTC = 12:42 Chile — bsale extra test run
+cron.schedule('0 3 * * *', () => runBsaleFactory());   // was produce() — now real products
 cron.schedule('0 10 * * *', () => runBsaleFactory());  // sales-driven HOT/COLD/STAR + reel 9:16
 cron.schedule('0 16 * * *', () => runBoykotFactory('liquidacion', 3));
 cron.schedule('42 16 * * *', () => runBsaleFactory()); // test run: 12:42 Chile (UTC-4) daily
