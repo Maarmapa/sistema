@@ -303,6 +303,36 @@ async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
   }
 }
 
+// ── ANIMATE URL — solo paso video (Gen-4.5) sobre una imagen ya generada ───
+// Útil para iterar: ya tenés una imagen ganadora (de Flux Kontext, POC, etc)
+// y solo querés animarla. Le pasás un URL público de imagen + prompt opcional.
+async function runAnimateUrl(imageUrl, customPrompt) {
+  try {
+    await sendTelegram(`🎬 <b>Animar URL</b>\n📥 <code>${imageUrl.slice(0, 80)}${imageUrl.length > 80 ? '...' : ''}</code>`);
+
+    // Default prompt: movimiento sutil editorial para joyería/producto premium.
+    const motionPrompt = customPrompt || `Slow cinematic reveal with subtle motion, gentle parallax camera, dramatic soft light sweeps across the subject, premium luxury jewelry brand presentation, editorial fashion film quality, slight natural sway`;
+
+    await sendTelegramPhoto(imageUrl, '📸 Frame de entrada');
+    await sendTelegram(`🎬 Generando video Gen-4.5 (5s · 9:16)...`);
+
+    const videoTask = await runway.imageToVideo.create({
+      model: RUNWAY_MODEL,
+      promptImage: imageUrl,
+      promptText: motionPrompt,
+      duration: durationForModel(RUNWAY_MODEL, 5),
+      ratio: '720:1280',
+    }).waitForTaskOutput();
+
+    const caption = `🎬 Animado con Gen-4.5\n\n<i>${motionPrompt.slice(0, 120)}${motionPrompt.length > 120 ? '...' : ''}</i>`;
+    await sendTelegramVideo(videoTask.output[0], caption);
+    await sendTelegram(`✅ <b>Video listo</b>`);
+  } catch (e) {
+    console.error('[animate-url] error:', e);
+    await sendTelegram(`❌ Animar error: ${e.message}`);
+  }
+}
+
 // ── BOYKOT FACTORY ────────────────────────────────────────────
 async function runBoykotFactory(mode = 'top', limit = 3) {
   console.log(`\n🛍️ BOYKOT FACTORY — mode: ${mode}`);
@@ -423,6 +453,11 @@ async function pollTelegram() {
 Estilos: <code>pomellato</code> | <code>miniatures</code> | <code>lifestyle</code>
 Ej: <code>/byso pomellato https://byso.cl/collar-humo</code>
 
+<b>🎬 Animar imagen ya generada</b>
+/animar [url] — toma cualquier URL pública de imagen y la pasa por Gen-4.5
+Opcional con prompt custom: <code>/animar [url] | [motion prompt]</code>
+Ej: <code>/animar https://cdn.../v2.png | gentle swing motion</code>
+
 <b>⏰ Crons automáticos (hora Chile)</b>
 23:00 — /produce diario (mini docu)
 06:00 — /bsale (HOT/COLD/STAR)
@@ -445,6 +480,22 @@ Ej: <code>/byso pomellato https://byso.cl/collar-humo</code>
         const url = msg.replace('/url ', '').trim();
         await sendTelegram('🛍️ Procesando producto...');
         runBoykotUrl(url);
+      } else if (msg.startsWith('/animar')) {
+        // /animar [url] [prompt opcional]
+        // Toma una URL pública de imagen y la anima con Gen-4.5.
+        // Útil para iterar sobre imágenes que ya tenés (Flux Kontext, POC, etc).
+        const rest = msg.replace(/^\/animar\s*/, '').trim();
+        if (!rest) {
+          await sendTelegram('Uso: <code>/animar [url-imagen] [prompt opcional]</code>\nEj: <code>/animar https://...png</code> o <code>/animar https://...png | gentle swing motion</code>');
+        } else {
+          const [url, ...promptParts] = rest.split(/\s*\|\s*/);
+          const customPrompt = promptParts.join(' | ').trim() || null;
+          if (!url.startsWith('http')) {
+            await sendTelegram('❌ URL inválido. Debe empezar con http(s)://');
+          } else {
+            runAnimateUrl(url, customPrompt).catch(e => sendTelegram(`❌ Animar fatal: ${e.message}`).catch(() => {}));
+          }
+        }
       } else if (msg.startsWith('/byso')) {
         // /byso [style] [url]  ó  /byso [url] (default lifestyle)
         // styles válidos: pomellato, miniatures, lifestyle
@@ -1471,6 +1522,28 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: err.message }));
       }
     });
+  } else if (req.method === 'POST' && req.url === '/animate-url') {
+    // Animar una imagen ya generada (Flux, POC, cualquier URL pública) con Gen-4.5.
+    // Body: { url: string, prompt?: string }
+    if (!requireAuth(req, res)) return;
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { url, prompt } = body ? JSON.parse(body) : {};
+        if (!url || !url.startsWith('http')) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'url requerido (https://...)' }));
+          return;
+        }
+        res.writeHead(202);
+        res.end(JSON.stringify({ message: 'Animate URL started', url }));
+        runAnimateUrl(url, prompt || null);
+      } catch (err) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
   } else if (req.method === 'GET' && req.url === '/films') {
     const dir = './films';
     const films = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
@@ -1488,6 +1561,7 @@ server.listen(PORT, () => {
   console.log('📱 Telegram: @Maarmapabot');
   console.log('🛍️ /url [boykot url] — Gen-4 Image + Gen-4.5 Video');
   console.log('💎 /byso [estilo] [byso.cl url] — Magnific 4K + Gen-4 + Gen-4.5');
+  console.log('🎬 /animar [url] [| prompt] — anima imagen existente con Gen-4.5');
 });
 
 // ── DOCU BOYKOT ───────────────────────────────────────────────
