@@ -361,31 +361,70 @@ async function pollTelegram() {
 // ── IMAGE PADDING — letterbox to 9:16 so wide products aren't cropped ────
 // Uses wsrv.nl (Cloudflare-backed free image transform service) to wrap any
 // source image inside a 720x1280 black canvas with fit=contain (no crop).
-// Read image dimensions from JPEG header (first ~64KB is enough for SOF marker).
-// Returns { width, height, aspect } or null if can't determine.
+// Read image dimensions by properly walking JPEG/PNG/WebP segments.
+// Previous naive scan found false-positive SOF markers in compressed data
+// (e.g., reported 17032x21007 for a normal product image). This version
+// parses each segment using length fields — only the REAL SOF is found.
 async function getImageDimensions(url) {
   try {
     const res = await fetch(url, {
-      headers: { 'Range': 'bytes=0-65535', 'User-Agent': 'Mozilla/5.0' },
+      headers: { 'Range': 'bytes=0-262143', 'User-Agent': 'Mozilla/5.0' },
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok && res.status !== 206) return null;
     const buf = Buffer.from(await res.arrayBuffer());
-    // Find JPEG Start-Of-Frame marker (0xFFC0 to 0xFFCF, except 0xFFC4/C8/CC)
-    for (let i = 0; i < buf.length - 9; i++) {
-      if (buf[i] !== 0xFF) continue;
-      const marker = buf[i + 1];
-      if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
-        const height = buf.readUInt16BE(i + 5);
-        const width = buf.readUInt16BE(i + 7);
-        if (width > 0 && height > 0) return { width, height, aspect: width / height };
-      }
-    }
-    // PNG fallback: check PNG IHDR
+    const MAX_REASONABLE = 20000;
+
+    // PNG: signature 89 50 4E 47, dims at fixed offsets
     if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
       const width = buf.readUInt32BE(16);
       const height = buf.readUInt32BE(20);
-      if (width > 0 && height > 0) return { width, height, aspect: width / height };
+      if (width > 0 && height > 0 && width < MAX_REASONABLE && height < MAX_REASONABLE) {
+        return { width, height, aspect: width / height };
+      }
+    }
+
+    // WebP: 'RIFF....WEBP' then VP8/VP8L/VP8X chunks
+    if (buf.length > 30 && buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') {
+      const chunk = buf.slice(12, 16).toString();
+      if (chunk === 'VP8 ') {
+        const width = buf.readUInt16LE(26) & 0x3FFF;
+        const height = buf.readUInt16LE(28) & 0x3FFF;
+        if (width > 0 && height > 0) return { width, height, aspect: width / height };
+      } else if (chunk === 'VP8X') {
+        const width = 1 + buf.readUIntLE(24, 3);
+        const height = 1 + buf.readUIntLE(27, 3);
+        if (width > 0 && height > 0) return { width, height, aspect: width / height };
+      }
+    }
+
+    // JPEG: SOI is FFD8. Walk segments properly (not naive byte scan).
+    if (buf[0] !== 0xFF || buf[1] !== 0xD8) return null;
+    let i = 2;
+    while (i < buf.length - 9) {
+      if (buf[i] !== 0xFF) return null;
+      const marker = buf[i + 1];
+      if (marker === 0xFF) { i++; continue; }
+      if (marker === 0xD8 || marker === 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) {
+        i += 2;
+        continue;
+      }
+      const isSOF =
+        (marker >= 0xC0 && marker <= 0xC3) ||
+        (marker >= 0xC5 && marker <= 0xC7) ||
+        (marker >= 0xC9 && marker <= 0xCB) ||
+        (marker >= 0xCD && marker <= 0xCF);
+      if (isSOF) {
+        const height = buf.readUInt16BE(i + 5);
+        const width = buf.readUInt16BE(i + 7);
+        if (width > 0 && height > 0 && width < MAX_REASONABLE && height < MAX_REASONABLE) {
+          return { width, height, aspect: width / height };
+        }
+        return null;
+      }
+      const segLen = buf.readUInt16BE(i + 2);
+      if (segLen < 2) return null;
+      i += 2 + segLen;
     }
     return null;
   } catch (err) {
