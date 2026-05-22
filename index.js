@@ -223,13 +223,28 @@ async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
     const priceMatch = html.match(/"price":\s*"?(\d+(?:\.\d+)?)"?/);
     const price = priceMatch ? `$${Math.round(Number(priceMatch[1])).toLocaleString('es-CL')}` : '';
 
-    await sendTelegram(`💎 <b>${productName}</b>\n${price}\n🎨 Estilo: <b>${styleKey}</b>\n📤 Imagen 4K detectada · subiendo a Magnific...`);
+    await sendTelegram(`💎 <b>${productName}</b>\n${price}\n🎨 Estilo: <b>${styleKey}</b>`);
     await sendTelegramPhoto(imgUrl, `📸 Original: ${productName}`);
 
-    // STEP A: Magnific 4K upscale (más pixel signal = mejor render Gen-4)
-    const upscaled = await upscaleImage(imgUrl);
-    const highResUrl = upscaled || imgUrl;
-    await sendTelegram(upscaled ? '✅ Magnific upscale OK' : '⚠️ Magnific falló, sigo con original');
+    // STEP A: Magnific 4K upscale — pero SOLO si la imagen no es ya alta-res.
+    // Magnific tiene un cap de output ~16MP. Si input ya es ≥2000px, el upscale 2x
+    // genera >16MP y falla con "output image would be too large". Para joyería de
+    // estudio (típicamente 4000x4000) Magnific es overkill, así que se salta.
+    const dims = await getImageDimensions(imgUrl);
+    const needsUpscale = !dims || (Math.max(dims.width || 0, dims.height || 0) < 2000);
+    let highResUrl = imgUrl;
+    if (needsUpscale) {
+      await sendTelegram(`📤 Imagen ${dims ? dims.width+'x'+dims.height : '?'} · subiendo a Magnific...`);
+      const upscaled = await upscaleImage(imgUrl, 'byso');
+      if (upscaled) {
+        highResUrl = upscaled;
+        await sendTelegram('✅ Magnific upscale OK');
+      } else {
+        await sendTelegram('⚠️ Magnific falló, sigo con original');
+      }
+    } else {
+      await sendTelegram(`⏭️ Imagen ya es alta-res (${dims.width}x${dims.height}) · salto Magnific`);
+    }
 
     // STEP B: Gen-4 Image — producto + estilo de la clienta como references
     const styleRefUrl = BYSO_STYLE_REFS[styleKey] || null;
