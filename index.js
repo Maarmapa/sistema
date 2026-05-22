@@ -199,18 +199,19 @@ const BYSO_STYLE_REFS = {
 // Prompts comprimidos para entrar bajo 1000 chars (límite de Runway Gen-4 Image
 // promptText). Cada uno + BYSO_PRESERVATION_SUFFIX debe quedar <950 chars.
 const BYSO_STYLE_PROMPTS = {
-  // Pomellato: mini-mujer apoyada en la cadena como columpio. El @necklace tag
-  // hace que Runway use la imagen de referencia LITERALMENTE para renderizar la
-  // pieza (no como inspiración).
-  pomellato: `Hyperrealistic tiny miniature woman swinging on @necklace as if it were a children's swing. @necklace hangs from two suspension points at the top and curves into a U-shape under her weight. The miniature woman sits at the lowest point, legs dangling, hands gripping the two ascending strands of @necklace like swing ropes. @necklace visibly bears her weight where she sits — taut at her grip, slack curving below. She is TINY, proportional to a single bead, wearing editorial fashion. Pristine white seamless background, soft natural light, Pomellato Nudo luxury aesthetic`,
+  // Pomellato: UN SOLO collar doblado en columpio. El style ref del Pomellato real
+  // tenía 2 cadenas (era un campaña con 2 collares) y Runway estaba copiando esa
+  // estructura. Ahora sin style ref + énfasis textual en "one single necklace".
+  pomellato: `ONE SINGLE silver chain necklace (@necklace) folded into a swing shape. Both ends of @necklace hang from the top of the frame; the necklace forms a single continuous U-loop curving down in the middle. A hyperrealistic tiny miniature woman sits at the lowest point of the U, legs dangling, hands gripping the two ascending strands of the SAME @necklace like swing ropes. @necklace bears her weight — taut where she grips, slack curving below. She is TINY, proportional to a single bead, wearing editorial fashion. Pristine white seamless background, soft natural light, Pomellato Nudo luxury aesthetic. Only one chain visible`,
   // DS Custom Lab: @necklace gigante, obreros miniatura alrededor.
-  miniatures: `@necklace displayed as a monumental sculpture being painted by tiny miniature artisan figures in hardhats, with miniature scaffolding, ladders and paint buckets scattered around it. Tilt-shift miniature effect, dramatic scale play between giant @necklace and the small workers, pristine white seamless studio background, soft museum lighting, DS Custom Lab conceptual aesthetic, hyperrealistic miniatures, premium editorial composition. @necklace lies naturally in its real shape`,
+  miniatures: `@necklace displayed as a monumental sculpture being painted by tiny miniature artisan figures in hardhats, with miniature scaffolding, ladders and paint buckets scattered around it. Tilt-shift miniature effect, dramatic scale play between giant @necklace and the small workers, pristine white seamless studio background, soft museum lighting, DS Custom Lab conceptual aesthetic, hyperrealistic miniatures, premium editorial composition. @necklace lies naturally in its real shape. Only one necklace visible`,
   // Lifestyle: @necklace sobre superficie cotidiana premium.
-  lifestyle:  `@necklace draped naturally across a warm-toned matte ceramic surface next to a delicate espresso cup and a dried eucalyptus stem. Morning side light from a window, long soft shadows, minimal Scandinavian aesthetic, muted earth tones, Instagram editorial mood, shallow depth of field, fashion magazine quality`,
+  lifestyle:  `@necklace draped naturally across a warm-toned matte ceramic surface next to a delicate espresso cup and a dried eucalyptus stem. Morning side light from a window, long soft shadows, minimal Scandinavian aesthetic, muted earth tones, Instagram editorial mood, shallow depth of field, fashion magazine quality. Only one necklace visible`,
 };
 
-// Suffix con @necklace tag — referencia literal en lugar de descripción.
-const BYSO_PRESERVATION_SUFFIX = `CRITICAL: @necklace must match the tagged reference image exactly — same link pattern, bead count and sequence, same silver and dark colors. The chain may curve for composition but its structure stays identical. Never invent new links or beads. No text, no logos.`;
+// Suffix con preservación del clasp/cierre (zona donde Runway estaba inventando)
+// y bloqueo explícito contra agregar joyas adicionales.
+const BYSO_PRESERVATION_SUFFIX = `CRITICAL: @necklace must match the tagged reference exactly — same link pattern, bead count and sequence, same silver and dark colors, same clasp/closure detail. The chain may curve but structure stays identical. Never invent extra links, beads, chains or jewelry pieces. No text, no logos.`;
 
 async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
   try {
@@ -256,14 +257,11 @@ async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
       await sendTelegram(`⏭️ Imagen ya es alta-res (${dims.width}x${dims.height}) · salto Magnific`);
     }
 
-    // STEP B: Gen-4 Image — usa Runway TAGS para anchor literal del producto.
-    // Cuando el prompt menciona @necklace, Runway pega la imagen tagueada como
-    // referencia LITERAL del objeto (no como inspiración con weight). Es mucho
-    // más fuerte que weights altos para preservar pieza específica.
-    // Style ref sin tag = solo hint composicional general.
-    const styleRefUrl = BYSO_STYLE_REFS[styleKey] || null;
+    // STEP B: Gen-4 Image — solo @necklace tag para anchor literal del producto.
+    // El style ref se tiró: con @necklace + descripción textual de la composición
+    // es suficiente, y el ref de la clienta estaba metiendo elementos parásitos
+    // (ej: en pomellato la modelo navy + 2 cadenas que no eran del Collar Humo).
     const referenceImages = [{ uri: highResUrl, tag: 'necklace' }];
-    if (styleRefUrl) referenceImages.push({ uri: styleRefUrl });
 
     const stylePrompt = BYSO_STYLE_PROMPTS[styleKey] || BYSO_STYLE_PROMPTS.lifestyle;
     let promptText = `${stylePrompt}. ${BYSO_PRESERVATION_SUFFIX}`;
