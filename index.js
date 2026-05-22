@@ -815,16 +815,18 @@ async function runBsaleFactory() {
 
 // ── SCHEDULER ─────────────────────────────────────────────────
 // Cron schedule (UTC; user is Chile UTC-4 in winter):
-// - 03:00 UTC = 23:00 Chile (previous night) — was produce() with hardcoded
-//   generic "paintbrush" scenes; replaced with real-product bsale factory.
-//   produce() function still exists for manual /produce or /tema commands.
-// - 10:00 UTC = 06:00 Chile (morning) — main bsale daily run
-// - 16:00 UTC = 12:00 Chile — boykot liquidacion (legacy gen4_turbo flow)
-// - 16:42 UTC = 12:42 Chile — bsale extra test run
-cron.schedule('0 3 * * *', () => runBsaleFactory());   // was produce() — now real products
-cron.schedule('0 10 * * *', () => runBsaleFactory());  // sales-driven HOT/COLD/STAR + reel 9:16
-cron.schedule('0 16 * * *', () => runBoykotFactory('liquidacion', 3));
-cron.schedule('42 16 * * *', () => runBsaleFactory()); // test run: 12:42 Chile (UTC-4) daily
+// ALL crons now call runBsaleFactory() — the legacy runBoykotFactory uses
+// hardcoded Unsplash paintbrush placeholders that look generic and unrelated
+// to the actual product (same problem as old produce()). All real product
+// content comes from runBsaleFactory.
+// - 03:00 UTC = 23:00 Chile (previous night) — late-night batch
+// - 10:00 UTC = 06:00 Chile — morning batch
+// - 16:00 UTC = 12:00 Chile — midday batch (was liquidacion paintbrush slop)
+// - 22:00 UTC = 18:00 Chile — evening batch (moved from 16:42 UTC which was too close to 12:00)
+cron.schedule('0 3 * * *',  () => runBsaleFactory());
+cron.schedule('0 10 * * *', () => runBsaleFactory());
+cron.schedule('0 16 * * *', () => runBsaleFactory());
+cron.schedule('0 22 * * *', () => runBsaleFactory());
 
 // Sequential polling — one getUpdates at a time. Previous setInterval(pollTelegram, 3000)
 // caused self-conflict because Telegram allows only ONE active getUpdates per token at a time;
