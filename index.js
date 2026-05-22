@@ -197,10 +197,20 @@ const BYSO_STYLE_REFS = {
   miniatures: `${BYSO_REFS_BASE}/dscustomlab-ref.jpg`,
 };
 const BYSO_STYLE_PROMPTS = {
-  pomellato: `Editorial luxury jewelry campaign in the Pomellato Nudo aesthetic: an elegant silver chain necklace suspended dramatically in space against a pristine white seamless background, the chain forming graceful arcs as if floating, dynamic suspended energy. A woman model partially visible interacting playfully with the chain. Soft natural diffused light, magazine cover quality, minimalist composition, sharp focus on jewelry details, ultra premium high jewelry fashion photography`,
-  miniatures: `Conceptual surrealist jewelry photography in the DS Custom Lab aesthetic: an elegant silver chain necklace displayed as a monumental sculpture being painted and customized by tiny miniature artisan figures wearing hardhats and overalls, with miniature scaffolding, ladders, paint buckets and brushes around it. Tilt-shift miniature effect, scale play, pristine white seamless studio background, soft museum lighting, playful and conceptual fashion advertising, hyperrealistic miniatures`,
-  lifestyle:  `Modern lifestyle jewelry product photography: an elegant silver chain necklace draped artfully across a soft warm-toned matte ceramic surface next to a delicate espresso cup and a single dried eucalyptus stem. Morning side light streaming from a window casts long soft elegant shadows, minimal Scandinavian aesthetic, muted earth tones, contemporary Instagram editorial mood, shallow depth of field, fashion magazine quality`,
+  // Concepto Pomellato Nudo: el COLLAR es la escala normal (cuelga del top del frame
+  // como una cadena/columpio), y hay UNA MUJER EN MINIATURA (tiny, proporcional a
+  // un eslabón) sentada sobre la cadena como si fuera un columpio infantil.
+  // El collar NO se deforma, solo cuelga formando la silueta de un columpio.
+  pomellato: `A tiny miniature woman figure sitting on the silver chain necklace as if it were a children's swing — the chain hangs from the top of the frame forming an elegant arc with the lowest point at the bottom, and the miniature woman sits at the bottom of the arc holding the two ascending sides as if they were the ropes of a swing, swinging gracefully in mid-air. The miniature woman is hyperrealistic, wearing elegant editorial fashion (slim trousers, heels, simple top), proportional to a single chain bead — she is TINY compared to the necklace. Pristine white seamless studio background, soft natural diffused light, dramatic spatial composition with negative space, editorial luxury jewelry campaign in the Pomellato Nudo aesthetic, magazine cover quality, hyperrealistic miniature human figure, photorealistic, sharp focus on both the necklace chain and the miniature woman. The necklace itself hangs naturally without deformation`,
+  // Concepto DS Custom Lab: collar GIGANTE en suelo, obreros en miniatura alrededor.
+  miniatures: `An elegant silver chain necklace displayed as a monumental sculpture being painted and customized by tiny miniature artisan figures wearing hardhats and overalls, with miniature scaffolding, ladders, paint buckets and brushes scattered around it. Tilt-shift miniature effect, dramatic scale play between the giant jewelry piece and the small workers, pristine white seamless studio background, soft museum lighting with subtle shadows, playful conceptual fashion advertising in the DS Custom Lab aesthetic, hyperrealistic miniature figures, premium editorial composition. The necklace lies naturally on the surface in its real shape`,
+  // Concepto lifestyle: la joya descansa en una superficie cotidiana premium.
+  lifestyle:  `An elegant silver chain necklace draped artfully across a soft warm-toned matte ceramic surface next to a delicate espresso cup and a single dried eucalyptus stem. Morning side light streaming from a window casts long soft elegant shadows, minimal Scandinavian aesthetic, muted earth tones, contemporary Instagram editorial mood, shallow depth of field, fashion magazine quality. The necklace is laid out naturally, exactly as the reference shows`,
 };
+
+// Suffix anti-deformación aplicado a TODOS los estilos. Lenguaje quirúrgico para
+// que Runway respete la fidelidad de la joya por sobre la composición creativa.
+const BYSO_PRESERVATION_SUFFIX = `CRITICAL CONSTRAINT: The jewelry piece in this render MUST be identical to the reference product image — preserve the EXACT shape, EXACT chain link pattern, EXACT bead count and distribution, EXACT materials and EXACT metallic finish. DO NOT deform, distort, simplify, stretch, bend or modify the necklace in any way. The product is the hero of the image and must be photorealistically faithful to the reference. No text overlay, no logos, no watermarks, no brand marks.`;
 
 async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
   try {
@@ -246,13 +256,15 @@ async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
       await sendTelegram(`⏭️ Imagen ya es alta-res (${dims.width}x${dims.height}) · salto Magnific`);
     }
 
-    // STEP B: Gen-4 Image — producto + estilo de la clienta como references
+    // STEP B: Gen-4 Image — producto (anchor fuerte) + estilo de la clienta (influencia).
+    // Producto en 0.95 para preservar fidelidad máxima de la joya.
+    // Estilo en 0.45 para que aporte composición sin dominar la silueta del producto.
     const styleRefUrl = BYSO_STYLE_REFS[styleKey] || null;
-    const referenceImages = [{ uri: highResUrl, weight: 0.92 }];
-    if (styleRefUrl) referenceImages.push({ uri: styleRefUrl, weight: 0.5 });
+    const referenceImages = [{ uri: highResUrl, weight: 0.95 }];
+    if (styleRefUrl) referenceImages.push({ uri: styleRefUrl, weight: 0.45 });
 
     const stylePrompt = BYSO_STYLE_PROMPTS[styleKey] || BYSO_STYLE_PROMPTS.lifestyle;
-    const promptText = `${stylePrompt}. Preserve the EXACT shape, chain links, beads, materials and metallic colors of the reference jewelry piece. Photorealistic, no text overlay, no logos.`;
+    const promptText = `${stylePrompt}. ${BYSO_PRESERVATION_SUFFIX}`;
 
     await sendTelegram('🎨 Generando render Gen-4 Image (ratio 9:16)...');
     const imageTask = await runway.textToImage.create({
