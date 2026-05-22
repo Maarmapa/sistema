@@ -199,17 +199,24 @@ const BYSO_STYLE_REFS = {
 // Prompts comprimidos para entrar bajo 1000 chars (límite de Runway Gen-4 Image
 // promptText). Cada uno + BYSO_PRESERVATION_SUFFIX debe quedar <950 chars.
 const BYSO_STYLE_PROMPTS = {
-  // Pomellato: mini-mujer sentada en la cadena como columpio. Collar = escala normal,
-  // mujer = miniatura proporcional a un eslabón.
-  pomellato: `A tiny miniature woman sitting on the silver chain necklace as if it were a children's swing — the chain hangs from the top of the frame forming a graceful arc, the miniature woman sits at the bottom of the arc holding the two ascending sides as if they were swing ropes, swinging in mid-air. The woman is hyperrealistic in elegant editorial fashion, proportional to a single chain bead — TINY compared to the necklace. Pristine white seamless background, soft natural light, editorial Pomellato Nudo luxury aesthetic, magazine quality. The necklace hangs naturally without deformation`,
+  // Pomellato: mini-mujer apoyada en la cadena como columpio. Énfasis en física
+  // del swing (cadena se curva por el peso de la mujer) + contacto visible (la
+  // mujer está sentada ENCIMA de la cadena, sus manos agarran las cuerdas que
+  // ascienden). El producto puede curvarse para el columpio pero los eslabones/
+  // bolitas deben mantener el mismo patrón.
+  pomellato: `Hyperrealistic tiny miniature woman swinging on the silver chain necklace as a children's swing. The chain hangs from two suspension points at the top and curves into a U-shape under her weight. The miniature woman sits at the lowest point, legs dangling, hands gripping the two ascending strands like swing ropes. The chain visibly bears her weight where she sits — taut at her grip, slack curving below. She is TINY, proportional to a single chain bead, wearing editorial fashion. Pristine white seamless background, soft natural light, Pomellato Nudo luxury aesthetic, sharp focus on the contact with the chain`,
   // DS Custom Lab: collar gigante, obreros miniatura alrededor.
   miniatures: `The silver chain necklace displayed as a monumental sculpture being painted by tiny miniature artisan figures in hardhats, with miniature scaffolding, ladders and paint buckets scattered around it. Tilt-shift miniature effect, dramatic scale play between giant jewelry and small workers, pristine white seamless studio background, soft museum lighting, DS Custom Lab conceptual aesthetic, hyperrealistic miniatures, premium editorial. The necklace lies naturally in its real shape`,
   // Lifestyle: joyería sobre superficie cotidiana premium.
   lifestyle:  `The silver chain necklace draped naturally across a warm-toned matte ceramic surface next to a delicate espresso cup and a dried eucalyptus stem. Morning side light from a window, long soft shadows, minimal Scandinavian aesthetic, muted earth tones, Instagram editorial mood, shallow depth of field, fashion magazine quality`,
 };
 
-// Suffix anti-deformación — corto pero quirúrgico.
-const BYSO_PRESERVATION_SUFFIX = `CRITICAL: necklace must remain identical to reference — preserve exact shape, chain links, beads, materials and metallic finish. Never deform, distort, stretch, bend or modify the piece. No text or logos.`;
+// Suffix anti-deformación reformulado. Clave: preservar el PATRÓN de eslabones/
+// bolitas (cantidad, tipo, secuencia, materiales), NO la pose lay-flat. El collar
+// puede curvarse naturalmente por la composición pero cada link/bead debe ser
+// idéntico al reference. Antes el prompt decía "exact shape" y Runway lo
+// interpretaba como "no curvar el collar", lo que rompía la composición.
+const BYSO_PRESERVATION_SUFFIX = `CRITICAL: necklace links, beads and materials must match the reference exactly — same link pattern, bead count and sequence, same silver and dark colors. The chain may curve for composition but its structure stays identical. Never invent new links or beads. No text, no logos.`;
 
 async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
   try {
@@ -255,12 +262,13 @@ async function runBysoUrl(productUrl, styleKey = 'lifestyle') {
       await sendTelegram(`⏭️ Imagen ya es alta-res (${dims.width}x${dims.height}) · salto Magnific`);
     }
 
-    // STEP B: Gen-4 Image — producto (anchor fuerte) + estilo de la clienta (influencia).
-    // Producto en 0.95 para preservar fidelidad máxima de la joya.
-    // Estilo en 0.45 para que aporte composición sin dominar la silueta del producto.
+    // STEP B: Gen-4 Image — producto (anchor MAX) + estilo de la clienta (hint suave).
+    // Producto a 0.98: justo bajo 1.0 (max), 1.0 puede ser demasiado rígido y romper
+    // composición. 0.98 ancla fuerte pero permite que la cadena se curve.
+    // Estilo a 0.30: solo hint composicional, no debe pull en geometría del producto.
     const styleRefUrl = BYSO_STYLE_REFS[styleKey] || null;
-    const referenceImages = [{ uri: highResUrl, weight: 0.95 }];
-    if (styleRefUrl) referenceImages.push({ uri: styleRefUrl, weight: 0.45 });
+    const referenceImages = [{ uri: highResUrl, weight: 0.98 }];
+    if (styleRefUrl) referenceImages.push({ uri: styleRefUrl, weight: 0.30 });
 
     const stylePrompt = BYSO_STYLE_PROMPTS[styleKey] || BYSO_STYLE_PROMPTS.lifestyle;
     let promptText = `${stylePrompt}. ${BYSO_PRESERVATION_SUFFIX}`;
