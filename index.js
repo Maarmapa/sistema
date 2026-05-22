@@ -955,13 +955,13 @@ async function runBsaleFactory() {
           return null;
         }
 
-        let videoUrl = await callRunwayDirect(RUNWAY_MODEL);
-        if (!videoUrl && RUNWAY_MODEL !== RUNWAY_MODEL_FAST) {
-          console.log(`[bsale-factory ${status}] ${RUNWAY_MODEL} failed, falling back to ${RUNWAY_MODEL_FAST}`);
-          videoUrl = await callRunwayDirect(RUNWAY_MODEL_FAST);
-        }
+        // No fallback to gen4_turbo — keeps output quality consistent.
+        // If gen4.5 fails for a specific product, we skip it and log
+        // (same principle as 'no slop posted'). User can investigate
+        // the source image or retry manually if needed.
+        const videoUrl = await callRunwayDirect(RUNWAY_MODEL);
         if (!videoUrl) {
-          throw new Error(`runway: both ${RUNWAY_MODEL} and ${RUNWAY_MODEL_FAST} failed`);
+          throw new Error(`runway: ${RUNWAY_MODEL} failed for this product — skipped to preserve quality`);
         }
         console.log(`[bsale-factory ${status}] video URL ready: ${videoUrl.slice(0, 80)}`);
         await sendTelegramVideo(videoUrl, caption);
