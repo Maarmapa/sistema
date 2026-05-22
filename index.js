@@ -419,22 +419,36 @@ async function prepareSourceForReel(imageUrl) {
 async function upscaleImage(imageUrl) {
   try {
     console.log(`[upscale] starting magnific on ${imageUrl.slice(0, 80)}...`);
-    const startRes = await fetch('https://api.dev.runwayml.com/v1/image_upscale', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + RUNWAY_KEY,
-        'X-Runway-Version': '2024-11-06',
-      },
-      body: JSON.stringify({
-        model: 'magnific_precision_upscaler_v2',
-        imageUrl: imageUrl,
-      }),
-    });
-    const startData = await startRes.json();
-    console.log(`[upscale] start status=${startRes.status} id=${startData.id || 'NONE'}`);
-    if (!startData.id) {
-      console.error(`[upscale] failed to start: ${JSON.stringify(startData).slice(0, 200)}`);
+    // Try multiple body shapes — Runway docs don't expose image_upscale schema explicitly
+    const bodyShapes = [
+      { model: 'magnific_precision_upscaler_v2', imageUri: imageUrl },
+      { model: 'magnific_precision_upscaler_v2', inputImage: imageUrl },
+      { model: 'magnific_precision_upscaler_v2', image: imageUrl },
+      { model: 'magnific_precision_upscaler_v2', promptImage: imageUrl },
+    ];
+    let startData = null;
+    let startStatus = 0;
+    for (const body of bodyShapes) {
+      const fieldName = Object.keys(body).find(k => k !== 'model');
+      const startRes = await fetch('https://api.dev.runwayml.com/v1/image_upscale', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + RUNWAY_KEY,
+          'X-Runway-Version': '2024-11-06',
+        },
+        body: JSON.stringify(body),
+      });
+      startStatus = startRes.status;
+      startData = await startRes.json();
+      if (startData?.id) {
+        console.log(`[upscale] ✅ body shape "${fieldName}" accepted, task id=${startData.id}`);
+        break;
+      }
+      console.log(`[upscale] body shape "${fieldName}" rejected (${startStatus}): ${JSON.stringify(startData).slice(0, 250)}`);
+    }
+    if (!startData?.id) {
+      console.error(`[upscale] all body shapes failed — Magnific not usable for now`);
       return null;
     }
     for (let i = 0; i < 30; i++) {
@@ -443,11 +457,11 @@ async function upscaleImage(imageUrl) {
         headers: { 'Authorization': 'Bearer ' + RUNWAY_KEY, 'X-Runway-Version': '2024-11-06' },
       })).json();
       if (t.status === 'SUCCEEDED') {
-        console.log(`[upscale] SUCCEEDED → ${t.output?.[0]?.slice(0, 80)}`);
+        console.log(`[upscale] SUCCEEDED → ${(t.output?.[0] || '').slice(0, 80)}`);
         return t.output?.[0] || null;
       }
       if (t.status === 'FAILED') {
-        console.error(`[upscale] FAILED: ${JSON.stringify(t.failure || {}).slice(0, 200)}`);
+        console.error(`[upscale] FAILED: ${JSON.stringify(t.failure || t).slice(0, 250)}`);
         return null;
       }
     }
